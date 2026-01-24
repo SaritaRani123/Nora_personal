@@ -83,3 +83,4 @@ npm start
 ## ⚠️ Note
 
 This is a frontend-only project for UI/learning purposes. No backend functionality or API calls are included.
+cd techcore
