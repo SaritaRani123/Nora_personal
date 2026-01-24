@@ -10,10 +10,9 @@ import { Menu, X } from 'lucide-react'
 const navLinks = [
   { name: 'Home', href: '/' },
   { name: 'Features', href: '/features' },
-  { name: 'Use Cases', href: '/use-cases' },
   { name: 'Pricing', href: '/pricing' },
-  { name: 'Blog', href: '/blog' },
   { name: 'Contact', href: '/contact' },
+  { name: 'Dashboard', href: '/calendar' },
 ]
 
 export default function Navbar() {
@@ -41,12 +40,16 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center space-x-2">
             <motion.div whileHover={{ scale: 1.05 }}>
-              <div className="w-8 h-8 bg-primary-600 rounded-lg"></div>
+              <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                </svg>
+              </div>
             </motion.div>
-            <span className="text-xl font-bold text-gray-900">Momenteo</span>
+            <span className="text-xl font-bold text-gray-900">Nora</span>
           </Link>
 
-          <div className="hidden md:flex items-center space-x-8">
+          <div className="hidden md:flex items-center space-x-6">
             {navLinks.map((link) => (
               <Link
                 key={link.name}

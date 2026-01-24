@@ -3,51 +3,66 @@
 import React from 'react'
 import { motion } from 'framer-motion'
 import Card from '@/ui/Card'
-import { 
-  Briefcase, 
-  GraduationCap, 
-  Building2, 
+import {
+  Briefcase,
+  GraduationCap,
+  Building2,
   Heart,
   Code,
-  Store
+  Store,
 } from 'lucide-react'
 
 const useCases = [
   {
     icon: Briefcase,
-    title: 'Consulting Firms',
-    description: 'Manage client projects, track billable hours, and streamline invoicing for your consulting business.',
+    title: 'Consulting & freelancing',
+    description: 'Track billable expenses, log by project, and generate invoices for clients.',
+    accent: 'primary',
   },
   {
     icon: GraduationCap,
-    title: 'Educational Institutions',
-    description: 'Organize courses, manage student data, and track academic progress all in one platform.',
+    title: 'Education & training',
+    description: 'Manage course-related spending, travel, and supplies in one place.',
+    accent: 'info',
   },
   {
     icon: Building2,
-    title: 'Real Estate',
-    description: 'Handle property listings, client communications, and transaction management efficiently.',
+    title: 'Real estate',
+    description: 'Record property expenses, maintenance, and marketing costs by date.',
+    accent: 'success',
   },
   {
     icon: Heart,
     title: 'Healthcare',
-    description: 'Schedule appointments, manage patient records, and streamline administrative tasks.',
+    description: 'Track medical and office expenses for tax and reimbursement.',
+    accent: 'danger',
   },
   {
     icon: Code,
-    title: 'Tech Startups',
-    description: 'Track development sprints, manage team workflows, and monitor project milestones.',
+    title: 'Tech & startups',
+    description: 'Monitor SaaS, tools, and team expenses with calendar and reports.',
+    accent: 'warning',
   },
   {
     icon: Store,
-    title: 'Retail & E-commerce',
-    description: 'Manage inventory, track sales, and handle customer relationships seamlessly.',
+    title: 'Retail & e‑commerce',
+    description: 'Log inventory, shipping, and operational costs for better budgeting.',
+    accent: 'secondary',
   },
 ]
 
+const accentClasses: Record<string, string> = {
+  primary: 'bg-primary-50 text-primary-600',
+  success: 'bg-success-subtle text-success',
+  info: 'bg-info-subtle text-info',
+  warning: 'bg-warning-subtle text-warning',
+  danger: 'bg-danger-subtle text-danger',
+  secondary: 'bg-secondary-subtle text-secondary',
+}
+
 export default function UseCases() {
   return (
-    <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gray-50">
+    <section className="py-20 px-4 sm:px-6 lg:px-8 bg-white">
       <div className="max-w-7xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -57,14 +72,14 @@ export default function UseCases() {
           className="text-center mb-16"
         >
           <h2 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-4">
-            Perfect for Every Industry
+            Built for every workflow
           </h2>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            See how businesses across different sectors use our platform
+            Freelancers, teams, and small businesses use Nora to stay on budget
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {useCases.map((useCase, index) => {
             const Icon = useCase.icon
             return (
@@ -73,13 +88,15 @@ export default function UseCases() {
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: index * 0.1 }}
+                transition={{ duration: 0.5, delay: index * 0.08 }}
               >
-                <Card>
-                  <div className="w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl flex items-center justify-center mb-4">
-                    <Icon className="w-7 h-7 text-white" />
+                <Card className="h-full hover:shadow-lg hover:border-primary-100 transition-all duration-300">
+                  <div
+                    className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${accentClasses[useCase.accent]}`}
+                  >
+                    <Icon className="w-6 h-6" />
                   </div>
-                  <h3 className="text-xl font-semibold text-gray-900 mb-3">
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">
                     {useCase.title}
                   </h3>
                   <p className="text-gray-600 leading-relaxed">

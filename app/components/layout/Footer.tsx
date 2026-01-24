@@ -13,9 +13,11 @@ import {
 
 const footerLinks = {
   product: [
+    { name: 'Calendar', href: '/calendar' },
+    { name: 'Expenses', href: '/expenses' },
+    { name: 'Invoices', href: '/invoices' },
     { name: 'Features', href: '/features' },
     { name: 'Pricing', href: '/pricing' },
-    { name: 'Use Cases', href: '/use-cases' },
   ],
   company: [
     { name: 'About', href: '/about' },
@@ -45,7 +47,7 @@ const socialLinks = [
 
 export default function Footer() {
   return (
-    <footer className="bg-gray-900 text-gray-300">
+    <footer className="bg-gray-900 text-gray-300 relative z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-2 md:grid-cols-6 gap-8 mb-8">
           <div className="col-span-2">
@@ -54,12 +56,16 @@ export default function Footer() {
                 whileHover={{ scale: 1.05 }}
                 className="flex items-center space-x-2"
               >
-                <div className="w-8 h-8 bg-primary-600 rounded-lg"></div>
-                <span className="text-xl font-bold text-white">Momenteo</span>
+                <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                  </svg>
+                </div>
+                <span className="text-xl font-bold text-white">Nora</span>
               </motion.div>
             </Link>
             <p className="text-gray-400 mb-4 max-w-xs">
-              Streamline your business operations with our all-in-one platform.
+              Smart expense tracking and budget calculator for modern finance management. Track spending, manage budgets, and stay financially organized.
             </p>
             <div className="flex space-x-4">
               {socialLinks.map((social) => {
@@ -149,7 +155,7 @@ export default function Footer() {
         <div className="border-t border-gray-800 pt-8 mt-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-400 text-sm mb-4 md:mb-0">
-              © {new Date().getFullYear()} Momenteo. All rights reserved.
+              © {new Date().getFullYear()} Nora. All rights reserved.
             </p>
             <p className="text-gray-400 text-sm">
               Made with ❤️ for modern businesses

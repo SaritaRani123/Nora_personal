@@ -7,8 +7,8 @@ import Footer from '@/app/components/layout/Footer'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Momenteo Clone - Modern SaaS Platform',
-  description: 'A modern SaaS platform for managing your business',
+  title: 'Nora - Expense & Budget Calculator',
+  description: 'Smart expense tracking, budget calculator, and finance management for freelancers and businesses',
 }
 
 export default function RootLayout({

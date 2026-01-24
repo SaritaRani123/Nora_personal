@@ -27,7 +27,7 @@ const sections = [
   },
   {
     title: 'Contact Us',
-    content: 'If you have questions about this Privacy Policy, please contact us at privacy@momenteo.com.',
+    content: 'If you have questions about this Privacy Policy, please contact us at privacy@nora.app.',
   },
 ]
 

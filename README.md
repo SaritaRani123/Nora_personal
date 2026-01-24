@@ -1,6 +1,6 @@
-# Momenteo Clone - Frontend Project
+# Nora - Expense & Budget Management
 
-A modern SaaS landing page frontend inspired by Momenteo, built with Next.js 14, React 18, TypeScript, and Tailwind CSS.
+A modern app for expense tracking, budget calculation, and invoice generation. Built with Next.js 14, React 18, TypeScript, and Tailwind CSS.
 
 ## 🚀 Tech Stack
 
