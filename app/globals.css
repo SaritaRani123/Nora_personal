@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
+  --background: #fafafa;
   --foreground: #171717;
 }
 
@@ -22,8 +22,16 @@
   body {
     color: var(--foreground);
     background: var(--background);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     @apply antialiased;
+    @apply bg-gray-50;
+  }
+
+  /* Enhanced typography for financial data */
+  .currency {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+    letter-spacing: -0.01em;
   }
 }
 
@@ -32,76 +40,85 @@
     text-wrap: balance;
   }
 
-  /* Velzon-style utilities */
+  /* Premium finance SaaS utilities */
   .bg-warning-subtle {
-    background-color: #fef8ed;
+    background-color: #fffbeb;
   }
 
   .bg-info-subtle {
-    background-color: #e7f5fb;
+    background-color: #eff6ff;
   }
 
   .bg-success-subtle {
-    background-color: #e6f7f5;
+    background-color: #ecfdf5;
   }
 
   .bg-danger-subtle {
-    background-color: #fef0ed;
+    background-color: #fef2f2;
   }
 
   .bg-secondary-subtle {
-    background-color: #f4f4f6;
+    background-color: #f9fafb;
   }
 
   .text-warning {
-    color: #f7b84b;
+    color: #f59e0b;
   }
 
   .text-info {
-    color: #299cdb;
+    color: #3b82f6;
   }
 
   .text-success {
-    color: #0ab39c;
+    color: #10b981;
   }
 
   .text-danger {
-    color: #f06548;
+    color: #ef4444;
   }
 
   .text-secondary {
-    color: #878a99;
+    color: #6b7280;
   }
 
   .btn-soft-primary {
-    @apply bg-primary/10 text-primary hover:bg-primary/20 border-0;
+    @apply bg-primary-50 text-primary-600 hover:bg-primary-100 border-0 transition-colors;
   }
 
   .btn-soft-success {
-    @apply bg-success/10 text-success hover:bg-success/20 border-0;
+    @apply bg-success-subtle text-success hover:bg-green-50 border-0 transition-colors;
   }
 
   .btn-soft-info {
-    @apply bg-info/10 text-info hover:bg-info/20 border-0;
+    @apply bg-info-subtle text-info hover:bg-blue-50 border-0 transition-colors;
   }
 
   .btn-soft-danger {
-    @apply bg-danger/10 text-danger hover:bg-danger/20 border-0;
+    @apply bg-danger-subtle text-danger hover:bg-red-50 border-0 transition-colors;
   }
 
   .btn-soft-warning {
-    @apply bg-warning/10 text-warning hover:bg-warning/20 border-0;
+    @apply bg-warning-subtle text-warning hover:bg-amber-50 border-0 transition-colors;
   }
 
   .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold;
   }
 
   .bg-warning {
-    background-color: #f7b84b;
+    background-color: #f59e0b;
   }
 
   .text-warning-800 {
     color: #92400e;
+  }
+
+  /* Premium card styles */
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 shadow-soft transition-all duration-200;
+  }
+
+  .card-hover {
+    @apply card hover:shadow-card-hover hover:border-gray-300;
   }
 }

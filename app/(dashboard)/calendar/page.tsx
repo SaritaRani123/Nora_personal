@@ -1,20 +1,17 @@
 'use client';
 
-import { useExpenses } from '@/app/context/ExpensesContext';
 import CalendarView from '@/components/CalendarView';
 
 export default function CalendarPage() {
-  const { expenses, setExpenses } = useExpenses();
-
   return (
-    <div className="min-h-[420px] h-[480px] sm:h-[560px] w-full overflow-hidden">
-      <CalendarView
-        expenses={expenses}
-        onAddExpense={() => {}}
-        onEditExpense={() => {}}
-        onDeleteExpense={() => {}}
-        onExpensesChange={setExpenses}
-      />
+    <div className="w-full min-w-0 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900 mb-1">Calendar</h1>
+        <p className="text-sm text-gray-500">Unified financial activity timeline</p>
+      </div>
+      <div className="h-[calc(100vh-280px)] min-h-[600px]">
+        <CalendarView />
+      </div>
     </div>
   );
 }

@@ -7,86 +7,188 @@ import {
   endOfMonth,
   startOfWeek,
   endOfWeek,
+  startOfDay,
+  endOfDay,
   addMonths,
   subMonths,
   addWeeks,
   subWeeks,
+  addDays,
+  subDays,
+  addYears,
+  subYears,
   isSameMonth,
   isToday,
-  addDays,
+  isSameDay,
+  parseISO,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, List, LayoutGrid, X } from 'lucide-react';
-import type { Expense, ExpenseCategory, ExpenseStatus, PaymentMethod } from '@/types/invoice';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Calendar as CalendarIcon,
+  List,
+  LayoutGrid,
+  Clock,
+  X,
+  DollarSign,
+  Receipt,
+  Briefcase,
+  Plane,
+  StickyNote,
+  DollarSign as DollarIcon,
+  FileText,
+} from 'lucide-react';
+import { useCalendar } from '@/app/context/CalendarContext';
+import type { Expense, Invoice } from '@/types/invoice';
+import type { WorkEntry, TravelEntry, NoteEntry } from '@/types/calendar';
+import Modal from '@/ui/Modal';
 
-const categoryLabelsMap: Record<ExpenseCategory, string> = {
-  food: 'Food & Dining',
-  travel: 'Travel',
-  utilities: 'Utilities',
-  'office-supplies': 'Office Supplies',
-  entertainment: 'Entertainment',
-  healthcare: 'Healthcare',
-  transportation: 'Transportation',
-  shopping: 'Shopping',
-  education: 'Education',
-  other: 'Other',
+type CalendarViewType = 'month' | 'week' | 'day';
+
+type CalendarEntry = {
+  id: string;
+  type: 'expense' | 'income' | 'work' | 'travel' | 'note' | 'invoice';
+  date: string;
+  data: Expense | Invoice | WorkEntry | TravelEntry | NoteEntry;
+  amount?: number;
+  label: string;
+  color: string;
+  bgColor: string;
+  icon: React.ReactNode;
 };
 
-const statusLabelsMap: Record<ExpenseStatus, string> = {
-  pending: 'Pending',
-  approved: 'Approved',
-  reimbursed: 'Reimbursed',
-  rejected: 'Rejected',
-  cancelled: 'Cancelled',
-};
-
-const paymentMethodLabelsMap: Record<PaymentMethod, string> = {
-  cash: 'Cash',
-  'credit-card': 'Credit Card',
-  'debit-card': 'Debit Card',
-  'bank-transfer': 'Bank Transfer',
-  paypal: 'PayPal',
-  other: 'Other',
-};
-
-interface CalendarViewProps {
-  expenses: Expense[];
-  onAddExpense: (date: string) => void;
-  onEditExpense: (expense: Expense) => void;
-  onDeleteExpense: (expense: Expense) => void;
-  onExpensesChange: (expenses: Expense[]) => void;
-}
-
-export default function CalendarView({
-  expenses,
-  onAddExpense,
-  onEditExpense,
-  onDeleteExpense,
-  onExpensesChange,
-}: CalendarViewProps) {
+export default function CalendarView() {
+  const calendar = useCalendar();
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [view, setView] = useState<'month' | 'week'>('month');
+  const [view, setView] = useState<CalendarViewType>('month');
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<CalendarEntry | null>(null);
+  const [showEntryModal, setShowEntryModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [formDate, setFormDate] = useState('');
-  const [formVendor, setFormVendor] = useState('');
-  const [formCategory, setFormCategory] = useState<ExpenseCategory>('other');
-  const [formAmount, setFormAmount] = useState('');
-  const [formStatus, setFormStatus] = useState<ExpenseStatus>('pending');
-  const [formPaymentMethod, setFormPaymentMethod] = useState<PaymentMethod>('credit-card');
-  const [formDescription, setFormDescription] = useState('');
+  const [addEntryType, setAddEntryType] = useState<'expense' | 'work' | 'travel' | 'note' | 'invoice'>('expense');
 
-  const expensesByDate = useMemo(() => {
-    const map: Record<string, Expense[]> = {};
-    expenses.forEach((e) => {
-      if (!map[e.date]) map[e.date] = [];
-      map[e.date].push(e);
+  // Combine all entries into unified calendar entries
+  const calendarEntries = useMemo(() => {
+    const entries: CalendarEntry[] = [];
+
+    // Expenses (Red - money going out)
+    calendar.expenses.forEach((exp) => {
+      entries.push({
+        id: `exp-${exp.id}`,
+        type: 'expense',
+        date: exp.date,
+        data: exp,
+        amount: -exp.amount,
+        label: `${exp.vendor} - $${exp.amount.toFixed(2)}`,
+        color: 'text-red-700',
+        bgColor: 'bg-red-50 border-red-200',
+        icon: <Receipt className="w-3 h-3" />,
+      });
     });
-    Object.keys(map).forEach((d) => map[d].sort((a, b) => a.amount - b.amount));
-    return map;
-  }, [expenses]);
 
+    // Invoices/Income (Green - money coming in, when sent or paid)
+    calendar.invoices.forEach((inv) => {
+      if (inv.status === 'sent' || inv.status === 'paid') {
+        entries.push({
+          id: `inv-${inv.id}`,
+          type: 'income',
+          date: inv.issueDate,
+          data: inv,
+          amount: inv.amount,
+          label: `${inv.clientName} - $${inv.amount.toFixed(2)}`,
+          color: 'text-green-700',
+          bgColor: 'bg-green-50 border-green-200',
+          icon: <DollarIcon className="w-3 h-3" />,
+        });
+      }
+    });
+
+    // Work entries (Blue - time-based) - #3B82F6
+    calendar.workEntries.forEach((work) => {
+      entries.push({
+        id: `work-${work.id}`,
+        type: 'work',
+        date: work.date,
+        data: work,
+        label: `${work.clientName || 'Work'}: ${work.description}`,
+        color: 'text-blue-700',
+        bgColor: 'bg-blue-50 border-blue-200',
+        icon: <Briefcase className="w-3 h-3" />,
+      });
+    });
+
+    // Travel entries (Purple) - #8B5CF6
+    calendar.travelEntries.forEach((travel) => {
+      entries.push({
+        id: `travel-${travel.id}`,
+        type: 'travel',
+        date: travel.date,
+        data: travel,
+        label: `${travel.destination} - ${travel.purpose}`,
+        color: 'text-purple-700',
+        bgColor: 'bg-purple-50 border-purple-200',
+        icon: <Plane className="w-3 h-3" />,
+      });
+    });
+
+    // Notes (Gray) - #6B7280
+    calendar.notes.forEach((note) => {
+      entries.push({
+        id: `note-${note.id}`,
+        type: 'note',
+        date: note.date,
+        data: note,
+        label: note.title,
+        color: 'text-gray-700',
+        bgColor: 'bg-gray-50 border-gray-200',
+        icon: <StickyNote className="w-3 h-3" />,
+      });
+    });
+
+    return entries;
+  }, [calendar.expenses, calendar.invoices, calendar.workEntries, calendar.travelEntries, calendar.notes]);
+
+  // Group entries by date
+  const entriesByDate = useMemo(() => {
+    const map: Record<string, CalendarEntry[]> = {};
+    calendarEntries.forEach((entry) => {
+      const dateKey = entry.date;
+      if (!map[dateKey]) map[dateKey] = [];
+      map[dateKey].push(entry);
+    });
+    // Sort entries within each day
+    Object.keys(map).forEach((date) => {
+      map[date].sort((a, b) => {
+        // Sort by type priority, then by amount (if applicable)
+        const typeOrder = { expense: 0, income: 1, work: 2, travel: 3, note: 4 };
+        const typeDiff = typeOrder[a.type] - typeOrder[b.type];
+        if (typeDiff !== 0) return typeDiff;
+        return (b.amount || 0) - (a.amount || 0);
+      });
+    });
+    return map;
+  }, [calendarEntries]);
+
+  // Calculate totals per day
+  const totalsByDate = useMemo(() => {
+    const map: Record<string, { income: number; expense: number; net: number }> = {};
+    calendarEntries.forEach((entry) => {
+      const dateKey = entry.date;
+      if (!map[dateKey]) map[dateKey] = { income: 0, expense: 0, net: 0 };
+      if (entry.amount) {
+        if (entry.amount > 0) {
+          map[dateKey].income += entry.amount;
+        } else {
+          map[dateKey].expense += Math.abs(entry.amount);
+        }
+        map[dateKey].net = map[dateKey].income - map[dateKey].expense;
+      }
+    });
+    return map;
+  }, [calendarEntries]);
+
+  // Calendar grid calculations
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
   const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
@@ -103,203 +205,81 @@ export default function CalendarView({
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   const formatCurrency = (n: number) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
 
-  const openAdd = (date: Date) => {
+  const getDayEntries = (date: Date): CalendarEntry[] => {
+    const dateKey = format(date, 'yyyy-MM-dd');
+    return entriesByDate[dateKey] || [];
+  };
+
+  const getDayTotal = (date: Date) => {
+    const dateKey = format(date, 'yyyy-MM-dd');
+    return totalsByDate[dateKey] || { income: 0, expense: 0, net: 0 };
+  };
+
+  const handleEntryClick = (entry: CalendarEntry) => {
+    setSelectedEntry(entry);
+    setShowEntryModal(true);
+  };
+
+  const handleAddClick = (date: Date, type?: 'expense' | 'work' | 'travel' | 'note' | 'invoice') => {
     setSelectedDate(date);
-    setFormDate(format(date, 'yyyy-MM-dd'));
-    setFormVendor('');
-    setFormCategory('other');
-    setFormAmount('');
-    setFormStatus('pending');
-    setFormPaymentMethod('credit-card');
-    setFormDescription('');
+    if (type) setAddEntryType(type);
     setShowAddModal(true);
   };
 
-  const openEdit = (e: Expense) => {
-    setEditingExpense(e);
-    setFormDate(e.date);
-    setFormVendor(e.vendor);
-    setFormCategory(e.category);
-    setFormAmount(String(e.amount));
-    setFormStatus(e.status);
-    setFormPaymentMethod(e.paymentMethod);
-    setFormDescription(e.description || '');
-    setShowEditModal(true);
+  const navigateDate = (direction: 'prev' | 'next') => {
+    if (view === 'month') {
+      setCurrentDate(direction === 'prev' ? subMonths(currentDate, 1) : addMonths(currentDate, 1));
+    } else if (view === 'week') {
+      setCurrentDate(direction === 'prev' ? subWeeks(currentDate, 1) : addWeeks(currentDate, 1));
+    } else {
+      setCurrentDate(direction === 'prev' ? subDays(currentDate, 1) : addDays(currentDate, 1));
+    }
   };
 
-  const generateExpenseNumber = () => {
-    const year = new Date().getFullYear();
-    const max = expenses.reduce((m, ex) => {
-      const match = ex.expenseNumber.match(/EXP-(\d+)-(\d+)/);
-      if (match && parseInt(match[1]) === year) {
-        const n = parseInt(match[2]);
-        return n > m ? n : m;
-      }
-      return m;
-    }, 0);
-    return `EXP-${year}-${String(max + 1).padStart(3, '0')}`;
+  const navigateYear = (direction: 'prev' | 'next') => {
+    setCurrentDate(direction === 'prev' ? subYears(currentDate, 1) : addYears(currentDate, 1));
   };
 
-  const submitAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formVendor.trim() || !formAmount || Number(formAmount) <= 0) return;
-    const newExp: Expense = {
-      id: String(Date.now()),
-      expenseNumber: generateExpenseNumber(),
-      vendor: formVendor.trim(),
-      category: formCategory,
-      date: formDate,
-      amount: Number(formAmount),
-      status: formStatus,
-      paymentMethod: formPaymentMethod,
-      description: formDescription.trim() || undefined,
-    };
-    onExpensesChange([...expenses, newExp]);
-    onAddExpense(formDate);
-    setShowAddModal(false);
-  };
-
-  const submitEdit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingExpense || !formVendor.trim() || !formAmount || Number(formAmount) <= 0) return;
-    const updated: Expense = {
-      ...editingExpense,
-      vendor: formVendor.trim(),
-      category: formCategory,
-      date: formDate,
-      amount: Number(formAmount),
-      status: formStatus,
-      paymentMethod: formPaymentMethod,
-      description: formDescription.trim() || undefined,
-    };
-    onExpensesChange(expenses.map((ex) => (ex.id === editingExpense.id ? updated : ex)));
-    onEditExpense(updated);
-    setShowEditModal(false);
-    setEditingExpense(null);
-  };
-
-  const handleDelete = () => {
-    if (!editingExpense) return;
-    onDeleteExpense(editingExpense);
-    onExpensesChange(expenses.filter((ex) => ex.id !== editingExpense.id));
-    setShowEditModal(false);
-    setEditingExpense(null);
-  };
-
-  const dayEvents = (date: Date) => expensesByDate[format(date, 'yyyy-MM-dd')] || [];
-
-  const formFields = (
-    <>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-        <input
-          type="date"
-          value={formDate}
-          onChange={(e) => setFormDate(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          required
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Vendor *</label>
-        <input
-          type="text"
-          value={formVendor}
-          onChange={(e) => setFormVendor(e.target.value)}
-          placeholder="e.g. Starbucks, Uber"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          required
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-        <select
-          value={formCategory}
-          onChange={(e) => setFormCategory(e.target.value as ExpenseCategory)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-        >
-          {Object.entries(categoryLabelsMap).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Amount ($) *</label>
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          value={formAmount}
-          onChange={(e) => setFormAmount(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          required
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-        <select
-          value={formStatus}
-          onChange={(e) => setFormStatus(e.target.value as ExpenseStatus)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-        >
-          {Object.entries(statusLabelsMap).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Payment</label>
-        <select
-          value={formPaymentMethod}
-          onChange={(e) => setFormPaymentMethod(e.target.value as PaymentMethod)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-        >
-          {Object.entries(paymentMethodLabelsMap).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="col-span-2">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-        <textarea
-          value={formDescription}
-          onChange={(e) => setFormDescription(e.target.value)}
-          rows={2}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          placeholder="Optional"
-        />
-      </div>
-    </>
-  );
+  const currentYear = currentDate.getFullYear();
+  const years = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 
   return (
     <div className="h-full flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-gray-200">
+      {/* Premium Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 p-5 border-b border-gray-200 bg-gray-50/50">
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setCurrentDate(view === 'month' ? subMonths(currentDate, 1) : subWeeks(currentDate, 1))}
-            className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => navigateDate('prev')}
+            className="p-2 text-gray-500 hover:bg-white hover:text-gray-700 rounded-xl transition-colors"
             aria-label="Previous"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
-          <h2 className="text-lg font-semibold text-gray-900 min-w-[180px] text-center">
-            {view === 'month' ? format(currentDate, 'MMMM yyyy') : `Week of ${format(weekStart, 'MMM d')}`}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-gray-900 min-w-[200px] text-center">
+              {view === 'month' && format(currentDate, 'MMMM yyyy')}
+              {view === 'week' && `Week of ${format(weekStart, 'MMM d, yyyy')}`}
+              {view === 'day' && format(currentDate, 'EEEE, MMMM d, yyyy')}
+            </h2>
+            <select
+              value={currentYear}
+              onChange={(e) => setCurrentDate(new Date(parseInt(e.target.value), currentDate.getMonth(), 1))}
+              className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            >
+              {years.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             type="button"
-            onClick={() => setCurrentDate(view === 'month' ? addMonths(currentDate, 1) : addWeeks(currentDate, 1))}
-            className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => navigateDate('next')}
+            className="p-2 text-gray-500 hover:bg-white hover:text-gray-700 rounded-xl transition-colors"
             aria-label="Next"
           >
             <ChevronRight className="w-5 h-5" />
@@ -307,218 +287,371 @@ export default function CalendarView({
           <button
             type="button"
             onClick={() => setCurrentDate(new Date())}
-            className="px-3 py-1.5 text-sm font-medium text-primary-600 hover:bg-primary-50 rounded-lg"
+            className="px-4 py-2 text-sm font-medium text-primary-600 hover:bg-primary-50 rounded-xl transition-colors"
           >
             Today
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-gray-200 p-0.5">
+          <div className="flex rounded-xl border border-gray-200 p-0.5 bg-white">
             <button
               type="button"
               onClick={() => setView('month')}
-              className={`p-2 rounded-md transition-colors ${view === 'month' ? 'bg-primary text-white' : 'text-gray-500 hover:bg-gray-100'}`}
-              title="Month"
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                view === 'month' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
             >
-              <LayoutGrid className="w-4 h-4" />
+              Month
             </button>
             <button
               type="button"
               onClick={() => setView('week')}
-              className={`p-2 rounded-md transition-colors ${view === 'week' ? 'bg-primary text-white' : 'text-gray-500 hover:bg-gray-100'}`}
-              title="Week"
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                view === 'week' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
             >
-              <List className="w-4 h-4" />
+              Week
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('day')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                view === 'day' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Day
             </button>
           </div>
           <button
             type="button"
-            onClick={() => openAdd(currentDate)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-600 transition-colors font-medium"
+            onClick={() => handleAddClick(currentDate)}
+            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors font-medium shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            Add expense
+            Add Entry
           </button>
         </div>
       </div>
 
-      {/* Calendar */}
+      {/* Legend */}
+      <div className="px-5 py-3 border-b border-gray-200 bg-white flex flex-wrap items-center gap-4 text-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-red-50 border border-red-200"></div>
+          <span className="text-gray-600">Expenses</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-green-50 border border-green-200"></div>
+          <span className="text-gray-600">Income</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-blue-50 border border-blue-200"></div>
+          <span className="text-gray-600">Work</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-purple-50 border border-purple-200"></div>
+          <span className="text-gray-600">Travel</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-gray-50 border border-gray-200"></div>
+          <span className="text-gray-600">Notes</span>
+        </div>
+      </div>
+
+      {/* Calendar Content */}
       <div className="flex-1 overflow-auto p-4">
         {view === 'month' ? (
-          <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-lg overflow-hidden">
+          <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-xl overflow-hidden">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-              <div key={day} className="bg-gray-50 px-2 py-2 text-center text-xs font-semibold text-gray-500 uppercase">
+              <div key={day} className="bg-gray-50 px-3 py-2.5 text-center text-xs font-semibold text-gray-600 uppercase">
                 {day}
               </div>
             ))}
             {monthDays.map((day) => {
-              const events = dayEvents(day);
+              const entries = getDayEntries(day);
+              const totals = getDayTotal(day);
               const inMonth = isSameMonth(day, currentDate);
+              const isTodayDate = isToday(day);
               return (
                 <div
                   key={day.toISOString()}
-                  className={`min-h-[100px] bg-white p-1.5 flex flex-col ${
-                    !inMonth ? 'opacity-50' : ''
-                  }`}
+                  className={`min-h-[120px] bg-white p-2 flex flex-col ${!inMonth ? 'opacity-40' : ''}`}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between mb-1">
                     <button
                       type="button"
-                      onClick={() => openAdd(day)}
-                      className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-medium ${
-                        isToday(day) ? 'bg-primary text-white' : 'hover:bg-gray-100 text-gray-700'
+                      onClick={() => handleAddClick(day)}
+                      className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-medium transition-colors ${
+                        isTodayDate
+                          ? 'bg-primary-600 text-white'
+                          : 'hover:bg-gray-100 text-gray-700'
                       }`}
                     >
                       {format(day, 'd')}
                     </button>
-                    {events.length > 0 && (
-                      <span className="text-xs text-gray-500">{events.length} item(s)</span>
+                    {totals.net !== 0 && (
+                      <span
+                        className={`text-xs font-semibold ${
+                          totals.net > 0 ? 'text-green-600' : 'text-red-600'
+                        }`}
+                      >
+                        {totals.net > 0 ? '+' : ''}
+                        {formatCurrency(totals.net)}
+                      </span>
                     )}
                   </div>
-                  <div className="mt-1 space-y-1 overflow-y-auto flex-1">
-                    {events.slice(0, 3).map((ex) => (
+                  <div className="mt-1 space-y-1 overflow-y-auto flex-1 min-h-0">
+                    {entries.slice(0, 4).map((entry) => (
                       <button
-                        key={ex.id}
+                        key={entry.id}
                         type="button"
-                        onClick={() => openEdit(ex)}
-                        className="w-full text-left px-2 py-1 rounded bg-primary-50 hover:bg-primary-100 text-primary-800 text-xs truncate"
-                        title={`${ex.vendor} ${formatCurrency(ex.amount)}`}
+                        onClick={() => handleEntryClick(entry)}
+                        className={`w-full text-left px-2 py-1 rounded-lg border text-xs truncate transition-all hover:shadow-sm ${entry.bgColor} ${entry.color}`}
+                        title={entry.label}
                       >
-                        {ex.vendor} · {formatCurrency(ex.amount)}
+                        <div className="flex items-center gap-1">
+                          {entry.icon}
+                          <span className="truncate">{entry.label}</span>
+                        </div>
                       </button>
                     ))}
-                    {events.length > 3 && (
+                    {entries.length > 4 && (
                       <button
                         type="button"
-                        onClick={() => openAdd(day)}
-                        className="w-full text-left px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 rounded"
+                        onClick={() => handleAddClick(day)}
+                        className="w-full text-left px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 rounded-lg"
                       >
-                        +{events.length - 3} more
+                        +{entries.length - 4} more
                       </button>
                     )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : view === 'week' ? (
+          <div className="grid grid-cols-7 gap-4">
+            {weekDays.map((day) => {
+              const entries = getDayEntries(day);
+              const totals = getDayTotal(day);
+              const isTodayDate = isToday(day);
+              return (
+                <div key={day.toISOString()} className="flex flex-col border border-gray-200 rounded-xl overflow-hidden bg-white">
+                  <div
+                    className={`px-4 py-3 text-sm font-semibold border-b border-gray-200 ${
+                      isTodayDate ? 'bg-primary-600 text-white' : 'bg-gray-50 text-gray-700'
+                    }`}
+                  >
+                    <div>{format(day, 'EEE')}</div>
+                    <div className="text-xs font-normal opacity-90">{format(day, 'MMM d')}</div>
+                    {totals.net !== 0 && (
+                      <div className={`text-xs mt-1 ${isTodayDate ? 'text-white' : totals.net > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {totals.net > 0 ? '+' : ''}
+                        {formatCurrency(totals.net)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 p-3 space-y-2 min-h-[200px] overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => handleAddClick(day)}
+                      className="w-full py-2 border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-primary-500 hover:text-primary-600 text-sm transition-colors"
+                    >
+                      <Plus className="w-4 h-4 mx-auto mb-0.5" />
+                      Add
+                    </button>
+                    {entries.map((entry) => (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        onClick={() => handleEntryClick(entry)}
+                        className={`w-full text-left px-3 py-2 rounded-lg border transition-all hover:shadow-sm ${entry.bgColor} ${entry.color}`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          {entry.icon}
+                          <span className="font-medium text-xs">{entry.type.toUpperCase()}</span>
+                        </div>
+                        <div className="text-sm font-medium truncate">{entry.label}</div>
+                        {entry.amount && (
+                          <div className="text-xs mt-1 font-semibold">
+                            {entry.amount > 0 ? '+' : ''}
+                            {formatCurrency(Math.abs(entry.amount))}
+                          </div>
+                        )}
+                      </button>
+                    ))}
                   </div>
                 </div>
               );
             })}
           </div>
         ) : (
-          <div className="grid grid-cols-7 gap-4">
-            {weekDays.map((day) => {
-              const events = dayEvents(day);
-              return (
-                <div key={day.toISOString()} className="flex flex-col border border-gray-200 rounded-lg overflow-hidden">
-                  <div
-                    className={`px-3 py-2 text-sm font-medium ${
-                      isToday(day) ? 'bg-primary text-white' : 'bg-gray-50 text-gray-700'
-                    }`}
+          <div className="max-w-4xl mx-auto">
+            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+              <div className={`px-6 py-4 border-b border-gray-200 ${isToday(currentDate) ? 'bg-primary-600 text-white' : 'bg-gray-50'}`}>
+                <div className="text-2xl font-bold">{format(currentDate, 'EEEE, MMMM d, yyyy')}</div>
+                {getDayTotal(currentDate).net !== 0 && (
+                  <div className={`text-sm mt-2 ${isToday(currentDate) ? 'text-white' : getDayTotal(currentDate).net > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    Net: {getDayTotal(currentDate).net > 0 ? '+' : ''}
+                    {formatCurrency(getDayTotal(currentDate).net)}
+                  </div>
+                )}
+              </div>
+              <div className="p-6 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => handleAddClick(currentDate)}
+                  className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:border-primary-500 hover:text-primary-600 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-5 h-5" />
+                  <span>Add Entry</span>
+                </button>
+                {getDayEntries(currentDate).map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={() => handleEntryClick(entry)}
+                    className={`w-full text-left px-4 py-3 rounded-xl border transition-all hover:shadow-md ${entry.bgColor} ${entry.color}`}
                   >
-                    {format(day, 'EEE, MMM d')}
-                  </div>
-                  <div className="flex-1 p-2 space-y-2 min-h-[120px]">
-                    <button
-                      type="button"
-                      onClick={() => openAdd(day)}
-                      className="w-full py-2 border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-primary hover:text-primary text-sm"
-                    >
-                      <Plus className="w-4 h-4 mx-auto mb-0.5" />
-                      Add
-                    </button>
-                    {events.map((ex) => (
-                      <button
-                        key={ex.id}
-                        type="button"
-                        onClick={() => openEdit(ex)}
-                        className="w-full text-left px-3 py-2 rounded-lg bg-primary-50 hover:bg-primary-100 border border-primary-100"
-                      >
-                        <div className="font-medium text-gray-900 truncate">{ex.vendor}</div>
-                        <div className="text-sm text-primary-700">{formatCurrency(ex.amount)}</div>
-                        <div className="text-xs text-gray-500">{categoryLabelsMap[ex.category]}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {entry.icon}
+                        <span className="font-semibold text-sm uppercase">{entry.type}</span>
+                      </div>
+                      {entry.amount && (
+                        <span className="font-bold">
+                          {entry.amount > 0 ? '+' : ''}
+                          {formatCurrency(Math.abs(entry.amount))}
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-medium">{entry.label}</div>
+                    {entry.type === 'work' && (entry.data as WorkEntry).hours && (
+                      <div className="text-xs mt-1 opacity-75">
+                        {(entry.data as WorkEntry).hours} hours
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Add modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Add expense · {selectedDate && format(selectedDate, 'MMM d, yyyy')}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={submitAdd} className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{formFields}</div>
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-600">
-                  Add expense
-                </button>
+      {/* Entry Detail Modal */}
+      <Modal
+        isOpen={showEntryModal}
+        onClose={() => {
+          setShowEntryModal(false);
+          setSelectedEntry(null);
+        }}
+        title={selectedEntry ? `${selectedEntry.type.toUpperCase()} Entry` : ''}
+        size="md"
+      >
+        {selectedEntry && (
+          <div className="space-y-4">
+            <div className={`p-4 rounded-xl border ${selectedEntry.bgColor}`}>
+              <div className="flex items-center gap-2 mb-2">
+                {selectedEntry.icon}
+                <span className="font-semibold">{selectedEntry.type.toUpperCase()}</span>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit modal */}
-      {showEditModal && editingExpense && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Edit expense · {editingExpense.expenseNumber}</h3>
-              <button
-                type="button"
-                onClick={() => { setShowEditModal(false); setEditingExpense(null); }}
-                className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={submitEdit} className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{formFields}</div>
-              <div className="flex justify-between mt-6">
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="px-4 py-2 text-red-600 bg-red-50 rounded-lg hover:bg-red-100"
-                >
-                  Delete
-                </button>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => { setShowEditModal(false); setEditingExpense(null); }}
-                    className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-600">
-                    Save changes
-                  </button>
+              <div className="font-medium text-gray-900">{selectedEntry.label}</div>
+              {selectedEntry.amount && (
+                <div className={`text-lg font-bold mt-2 ${selectedEntry.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {selectedEntry.amount > 0 ? '+' : ''}
+                  {formatCurrency(Math.abs(selectedEntry.amount))}
                 </div>
+              )}
+            </div>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="font-medium text-gray-500">Date:</span>{' '}
+                <span className="text-gray-900">
+                  {format(parseISO(selectedEntry.date), 'MMMM d, yyyy')}
+                </span>
               </div>
-            </form>
+              {selectedEntry.type === 'expense' && (
+                <>
+                  <div>
+                    <span className="font-medium text-gray-500">Vendor:</span>{' '}
+                    <span className="text-gray-900">{(selectedEntry.data as Expense).vendor}</span>
+                  </div>
+                  {(selectedEntry.data as Expense).description && (
+                    <div>
+                      <span className="font-medium text-gray-500">Description:</span>{' '}
+                      <span className="text-gray-900">{(selectedEntry.data as Expense).description}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {selectedEntry.type === 'income' && (
+                <>
+                  <div>
+                    <span className="font-medium text-gray-500">Client:</span>{' '}
+                    <span className="text-gray-900">{(selectedEntry.data as Invoice).clientName}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-500">Invoice:</span>{' '}
+                    <span className="text-gray-900">{(selectedEntry.data as Invoice).invoiceNumber}</span>
+                  </div>
+                </>
+              )}
+              {selectedEntry.type === 'work' && (
+                <>
+                  {(selectedEntry.data as WorkEntry).clientName && (
+                    <div>
+                      <span className="font-medium text-gray-500">Client:</span>{' '}
+                      <span className="text-gray-900">{(selectedEntry.data as WorkEntry).clientName}</span>
+                    </div>
+                  )}
+                  {(selectedEntry.data as WorkEntry).hours && (
+                    <div>
+                      <span className="font-medium text-gray-500">Hours:</span>{' '}
+                      <span className="text-gray-900">{(selectedEntry.data as WorkEntry).hours}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {selectedEntry.type === 'travel' && (
+                <>
+                  <div>
+                    <span className="font-medium text-gray-500">Destination:</span>{' '}
+                    <span className="text-gray-900">{(selectedEntry.data as TravelEntry).destination}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-500">Purpose:</span>{' '}
+                    <span className="text-gray-900">{(selectedEntry.data as TravelEntry).purpose}</span>
+                  </div>
+                </>
+              )}
+              {selectedEntry.type === 'note' && (
+                <div>
+                  <span className="font-medium text-gray-500">Content:</span>
+                  <div className="text-gray-900 mt-1 p-2 bg-gray-50 rounded-lg">
+                    {(selectedEntry.data as NoteEntry).content}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Add Entry Modal - Simplified for now, can be expanded */}
+      <Modal
+        isOpen={showAddModal}
+        onClose={() => {
+          setShowAddModal(false);
+          setSelectedDate(null);
+        }}
+        title={`Add ${addEntryType.charAt(0).toUpperCase() + addEntryType.slice(1)} Entry`}
+        size="md"
+      >
+        <div className="text-center py-8 text-gray-500">
+          <p>Add entry form will be implemented here.</p>
+          <p className="text-sm mt-2">For now, use the Expenses or Invoices pages to add entries.</p>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

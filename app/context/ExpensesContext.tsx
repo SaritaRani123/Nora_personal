@@ -1,8 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useCallback } from 'react';
 import type { Expense } from '@/types/invoice';
-import { mockExpenses } from '@/data/mockInvoices';
+import { useCalendar } from './CalendarContext';
 
 type ExpensesContextValue = {
   expenses: Expense[];
@@ -14,24 +14,40 @@ type ExpensesContextValue = {
 
 const ExpensesContext = createContext<ExpensesContextValue | null>(null);
 
+// ExpensesProvider now uses CalendarContext internally for unified state
 export function ExpensesProvider({ children }: { children: React.ReactNode }) {
-  const [expenses, setExpenses] = useState<Expense[]>(mockExpenses);
+  const calendar = useCalendar();
 
-  const addExpense = useCallback((e: Expense) => {
-    setExpenses((prev) => [...prev, e]);
-  }, []);
+  const addExpense = useCallback(
+    (e: Expense) => {
+      calendar.addExpense(e);
+    },
+    [calendar]
+  );
 
-  const updateExpense = useCallback((id: string, updates: Partial<Expense>) => {
-    setExpenses((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)));
-  }, []);
+  const updateExpense = useCallback(
+    (id: string, updates: Partial<Expense>) => {
+      calendar.updateExpense(id, updates);
+    },
+    [calendar]
+  );
 
-  const deleteExpense = useCallback((id: string) => {
-    setExpenses((prev) => prev.filter((e) => e.id !== id));
-  }, []);
+  const deleteExpense = useCallback(
+    (id: string) => {
+      calendar.deleteExpense(id);
+    },
+    [calendar]
+  );
 
   return (
     <ExpensesContext.Provider
-      value={{ expenses, setExpenses, addExpense, updateExpense, deleteExpense }}
+      value={{
+        expenses: calendar.expenses,
+        setExpenses: calendar.setExpenses,
+        addExpense,
+        updateExpense,
+        deleteExpense,
+      }}
     >
       {children}
     </ExpensesContext.Provider>

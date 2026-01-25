@@ -39,18 +39,28 @@ export interface InvoiceLineItem {
   description: string;
   amount: number;
   quantity?: number;
+  unitPrice?: number;
+  taxPercent?: number;
 }
 
 export interface Invoice {
   id: string;
   invoiceNumber: string;
-  clientName: string;
+  clientId?: string; // new: reference to client
+  clientName: string; // kept for backward compatibility
   clientEmail?: string;
-  amount: number;
+  amount: number; // legacy: computed grandTotal for backward compatibility
   status: InvoiceStatus;
   issueDate: string;
   dueDate?: string;
   lineItems: InvoiceLineItem[];
   notes?: string;
   paymentTerms?: string;
+  // New fields for discount and late fees
+  discountEnabled?: boolean;
+  discountPercent?: number;
+  lateFeeEnabled?: boolean;
+  feePercent?: number;
+  applyEveryXDays?: number;
+  calendarEventId?: string; // link to calendar event
 }
