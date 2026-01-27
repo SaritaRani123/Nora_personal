@@ -1,0 +1,131 @@
+'use client'
+
+import { create } from 'zustand'
+import { expenses as initialExpenses, invoices as initialInvoices, contacts as initialContacts } from './mock-data'
+
+// Types
+export interface Expense {
+  id: string
+  date: string
+  description: string
+  category: string
+  amount: number
+  paymentMethod: string
+  aiSuggested?: boolean
+  confidence?: number
+  status?: string
+  source?: 'manual' | 'calendar' | 'import'
+}
+
+export interface Invoice {
+  id: string
+  client: string
+  email: string
+  amount: number
+  status: 'paid' | 'pending' | 'overdue' | 'draft'
+  issueDate: string
+  dueDate: string
+  paidDate: string | null
+  source?: 'manual' | 'calendar'
+}
+
+export interface Contact {
+  id: string
+  name: string
+  email: string
+  phone: string
+  address: string
+}
+
+interface DataStore {
+  // Expenses
+  expenses: Expense[]
+  addExpense: (expense: Omit<Expense, 'id'>) => string
+  updateExpense: (id: string, expense: Partial<Expense>) => void
+  deleteExpense: (id: string) => void
+
+  // Invoices
+  invoices: Invoice[]
+  addInvoice: (invoice: Omit<Invoice, 'id'>) => string
+  updateInvoice: (id: string, invoice: Partial<Invoice>) => void
+  deleteInvoice: (id: string) => void
+
+  // Contacts/Clients
+  contacts: Contact[]
+  addContact: (contact: Omit<Contact, 'id'>) => string
+  updateContact: (id: string, contact: Partial<Contact>) => void
+  deleteContact: (id: string) => void
+}
+
+// Additional expenses for initial data
+const additionalExpenses: Expense[] = [
+  { id: '9', date: '2025-01-05', description: 'Business Insurance', amount: 450.00, category: 'insurance', paymentMethod: 'Bank Transfer', aiSuggested: true, confidence: 96, source: 'import' },
+  { id: '10', date: '2025-01-04', description: 'Employee Training', amount: 299.00, category: 'education', paymentMethod: 'Credit Card', aiSuggested: true, confidence: 88, source: 'import' },
+  { id: '11', date: '2025-01-03', description: 'Cloud Hosting - AWS', amount: 189.50, category: 'software', paymentMethod: 'Credit Card', aiSuggested: true, confidence: 98, source: 'import' },
+  { id: '12', date: '2025-01-02', description: 'Office Cleaning Service', amount: 150.00, category: 'utilities', paymentMethod: 'Bank Transfer', aiSuggested: true, confidence: 91, source: 'import' },
+]
+
+export const useDataStore = create<DataStore>((set, get) => ({
+  // Initialize with mock data
+  expenses: [...initialExpenses.map(e => ({ ...e, source: 'import' as const })), ...additionalExpenses],
+  invoices: initialInvoices.map(i => ({ ...i, source: 'manual' as const })),
+  contacts: [...initialContacts],
+
+  // Expense actions
+  addExpense: (expense) => {
+    const id = `exp-${Date.now()}`
+    set((state) => ({
+      expenses: [{ ...expense, id }, ...state.expenses],
+    }))
+    return id
+  },
+  updateExpense: (id, expense) => {
+    set((state) => ({
+      expenses: state.expenses.map((e) => (e.id === id ? { ...e, ...expense } : e)),
+    }))
+  },
+  deleteExpense: (id) => {
+    set((state) => ({
+      expenses: state.expenses.filter((e) => e.id !== id),
+    }))
+  },
+
+  // Invoice actions
+  addInvoice: (invoice) => {
+    const count = get().invoices.length + 1
+    const id = `INV-${String(count).padStart(3, '0')}`
+    set((state) => ({
+      invoices: [{ ...invoice, id }, ...state.invoices],
+    }))
+    return id
+  },
+  updateInvoice: (id, invoice) => {
+    set((state) => ({
+      invoices: state.invoices.map((i) => (i.id === id ? { ...i, ...invoice } : i)),
+    }))
+  },
+  deleteInvoice: (id) => {
+    set((state) => ({
+      invoices: state.invoices.filter((i) => i.id !== id),
+    }))
+  },
+
+  // Contact actions
+  addContact: (contact) => {
+    const id = `contact-${Date.now()}`
+    set((state) => ({
+      contacts: [...state.contacts, { ...contact, id }],
+    }))
+    return id
+  },
+  updateContact: (id, contact) => {
+    set((state) => ({
+      contacts: state.contacts.map((c) => (c.id === id ? { ...c, ...contact } : c)),
+    }))
+  },
+  deleteContact: (id) => {
+    set((state) => ({
+      contacts: state.contacts.filter((c) => c.id !== id),
+    }))
+  },
+}))
