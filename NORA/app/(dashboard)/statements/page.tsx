@@ -1,0 +1,791 @@
+'use client'
+
+import type React from 'react'
+import { useState, useCallback, useRef } from 'react'
+import useSWR, { mutate } from 'swr'
+import {
+  Upload,
+  FileText,
+  CheckCircle,
+  Clock,
+  Trash2,
+  Calendar,
+  AlertCircle,
+  X,
+} from 'lucide-react'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { cn } from '@/lib/utils'
+
+const fetcher = (url: string) => fetch(url).then((res) => res.json())
+
+type Statement = {
+  id: string
+  fileName: string
+  uploadDate: string
+  transactions: number
+  bank: string
+  accountType: 'Chequing' | 'Credit Card'
+}
+
+interface StatementsData {
+  statements: Statement[]
+  stats: {
+    totalStatements: number
+    totalTransactions: number
+    totalChequingStatements: number
+    totalCreditCardStatements: number
+  }
+}
+
+type UploadStatus = 'idle' | 'selected' | 'uploading' | 'processing' | 'completed' | 'error'
+
+export default function StatementsPage() {
+  const { data, isLoading } = useSWR<StatementsData>('/api/statements', fetcher)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number>(0)
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle')
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadResult, setUploadResult] = useState<{
+    transactions: number
+    bank: string
+    accountType: string
+  } | null>(null)
+  const [selectedBank, setSelectedBank] = useState<string>('BMO')
+  const [selectedAccountType, setSelectedAccountType] = useState<string>('Chequing')
+  const [bankFilter, setBankFilter] = useState('all')
+  const [accountTypeFilter, setAccountTypeFilter] = useState('all')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [statementToDelete, setStatementToDelete] = useState<Statement | null>(
+    null
+  )
+
+  const statements = data?.statements || []
+  const stats = data?.stats || {
+    totalStatements: 0,
+    totalTransactions: 0,
+    totalChequingStatements: 0,
+    totalCreditCardStatements: 0,
+  }
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+
+    const files = e.dataTransfer.files
+    if (files.length > 0) {
+      handleFileSelect(files[0])
+    }
+  }, [])
+
+  const handleFileSelect = (file: File) => {
+    // Validate file type
+    if (file.type !== 'application/pdf') {
+      setUploadError('Only PDF files are supported')
+      setUploadStatus('error')
+      return
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024
+    if (file.size > maxSize) {
+      setUploadError('File size exceeds 10MB limit')
+      setUploadStatus('error')
+      return
+    }
+
+    setSelectedFile(file)
+    setUploadStatus('selected')
+    setUploadError(null)
+  }
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files && files.length > 0) {
+      handleFileSelect(files[0])
+    }
+  }
+
+  const handleBrowseClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleClearFile = () => {
+    setSelectedFile(null)
+    setUploadStatus('idle')
+    setUploadError(null)
+    setUploadProgress(0)
+    setUploadResult(null)
+    setSelectedBank('BMO')
+    setSelectedAccountType('Chequing')
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleUpload = async () => {
+    if (!selectedFile) return
+
+    setUploadStatus('uploading')
+    setUploadProgress(0)
+    setUploadError(null)
+
+    try {
+      // Simulate progress while uploading
+      const progressInterval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval)
+            return 90
+          }
+          return prev + 10
+        })
+      }, 150)
+
+      // Create form data and upload
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+
+      const uploadResponse = await fetch('/api/statements/upload', {
+        method: 'POST',
+        body: formData,
+      })
+
+      clearInterval(progressInterval)
+
+      if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.json()
+        throw new Error(errorData.error || 'Upload failed')
+      }
+
+      const uploadData = await uploadResponse.json()
+      setUploadProgress(100)
+      setUploadStatus('processing')
+
+      // Simulate AI processing delay
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+
+      // Add statement to the list via API (use selected bank and account type from dropdowns)
+      await fetch('/api/statements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: selectedFile.name,
+          bank: selectedBank,
+          accountType: selectedAccountType,
+          transactions: uploadData.transactions,
+        }),
+      })
+
+      setUploadResult({
+        transactions: uploadData.transactions,
+        bank: selectedBank,
+        accountType: selectedAccountType,
+      })
+      setUploadStatus('completed')
+
+      // Refresh statements list
+      mutate('/api/statements')
+
+      // Reset after showing success
+      setTimeout(() => {
+        handleClearFile()
+      }, 3000)
+    } catch (error) {
+      setUploadError(
+        error instanceof Error ? error.message : 'Upload failed. Please try again.'
+      )
+      setUploadStatus('error')
+    }
+  }
+
+  const handleBankChange = async (statementId: string, newBank: string) => {
+    try {
+      await fetch(`/api/statements?id=${statementId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank: newBank }),
+      })
+      mutate('/api/statements')
+    } catch (error) {
+      console.error('Failed to update bank:', error)
+    }
+  }
+
+  const handleDeleteClick = (statement: Statement) => {
+    setStatementToDelete(statement)
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (statementToDelete) {
+      await fetch(`/api/statements?id=${statementToDelete.id}`, {
+        method: 'DELETE',
+      })
+      mutate('/api/statements')
+    }
+    setDeleteDialogOpen(false)
+    setStatementToDelete(null)
+  }
+
+  const filteredStatements = statements.filter((statement) => {
+    // Bank filter
+    if (
+      bankFilter !== 'all' &&
+      statement.bank.toLowerCase() !== bankFilter.toLowerCase()
+    ) {
+      return false
+    }
+
+    // Account type filter
+    if (
+      accountTypeFilter !== 'all' &&
+      statement.accountType.toLowerCase() !== accountTypeFilter.toLowerCase()
+    ) {
+      return false
+    }
+
+    // Date range filter
+    const uploadDate = new Date(statement.uploadDate)
+    if (fromDate) {
+      const from = new Date(fromDate)
+      if (uploadDate < from) return false
+    }
+    if (toDate) {
+      const to = new Date(toDate)
+      to.setHours(23, 59, 59, 999)
+      if (uploadDate > to) return false
+    }
+
+    return true
+  })
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const clearDateFilters = () => {
+    setFromDate('')
+    setToDate('')
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 p-6">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <Skeleton className="h-6 w-40 mb-2" />
+              <Skeleton className="h-4 w-60" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-48 w-full" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-32 mb-2" />
+              <Skeleton className="h-4 w-48" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-20 w-full" />
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6 p-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-bold text-foreground">Bank Statements</h1>
+        <p className="text-muted-foreground">Upload and manage your bank statements</p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card className="lg:col-span-2 bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-card-foreground">Upload Statement</CardTitle>
+            <CardDescription>Drop your PDF bank statements here for automatic processing</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={handleFileInputChange}
+              className="hidden"
+              aria-label="Select PDF file"
+            />
+
+            {/* Drag and drop area */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={uploadStatus === 'idle' ? handleBrowseClick : undefined}
+              className={cn(
+                'relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 md:p-12 transition-all duration-200',
+                isDragging && 'border-primary bg-primary/5 scale-[1.01]',
+                uploadStatus === 'idle' && !isDragging && 'border-border hover:border-primary/50 hover:bg-muted/30 cursor-pointer',
+                uploadStatus !== 'idle' && 'border-border bg-muted/20',
+                uploadStatus === 'error' && 'border-destructive/50 bg-destructive/5'
+              )}
+            >
+              {/* Idle State - Drop zone */}
+              {uploadStatus === 'idle' && (
+                <>
+                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                    <Upload className="h-8 w-8 text-primary" />
+                  </div>
+                  <p className="mb-2 text-lg font-medium text-foreground text-center">
+                    Drop your bank statement here
+                  </p>
+                  <p className="mb-4 text-sm text-muted-foreground text-center">
+                    Supports BMO, Scotiabank, TD, and CIBC PDF statements (max 10MB)
+                  </p>
+                  <Button 
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleBrowseClick()
+                    }}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 hover:scale-105 transition-transform cursor-pointer"
+                  >
+                    Select File
+                  </Button>
+                </>
+              )}
+
+              {/* Selected State - File ready to upload */}
+              {uploadStatus === 'selected' && selectedFile && (
+                <div className="w-full max-w-md space-y-4">
+                  <div className="flex items-start gap-4 rounded-lg bg-muted/50 p-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                      <FileText className="h-6 w-6 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground truncate">
+                        {selectedFile.name}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatFileSize(selectedFile.size)}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleClearFile}
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  
+                  {/* Bank Selection Dropdown */}
+                  <div className="space-y-2">
+                    <Label htmlFor="bank-select" className="text-sm font-medium text-foreground">
+                      Bank
+                    </Label>
+                    <Select value={selectedBank} onValueChange={setSelectedBank}>
+                      <SelectTrigger id="bank-select" className="w-full bg-background border-input hover:bg-muted/50 cursor-pointer">
+                        <SelectValue placeholder="Select a bank" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="BMO" className="cursor-pointer">BMO</SelectItem>
+                        <SelectItem value="Scotiabank" className="cursor-pointer">Scotiabank</SelectItem>
+                        <SelectItem value="TD" className="cursor-pointer">TD</SelectItem>
+                        <SelectItem value="CIBC" className="cursor-pointer">CIBC</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Account Type Selection Dropdown */}
+                  <div className="space-y-2">
+                    <Label htmlFor="account-type-select" className="text-sm font-medium text-foreground">
+                      Account Type
+                    </Label>
+                    <Select value={selectedAccountType} onValueChange={setSelectedAccountType}>
+                      <SelectTrigger id="account-type-select" className="w-full bg-background border-input hover:bg-muted/50 cursor-pointer">
+                        <SelectValue placeholder="Select account type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Chequing" className="cursor-pointer">Chequing</SelectItem>
+                        <SelectItem value="Credit Card" className="cursor-pointer">Credit Card</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={handleBrowseClick}
+                      className="flex-1 bg-transparent hover:bg-muted/50 cursor-pointer"
+                    >
+                      Change File
+                    </Button>
+                    <Button
+                      onClick={handleUpload}
+                      className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                    >
+                      Upload Statement
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Uploading State */}
+              {uploadStatus === 'uploading' && selectedFile && (
+                <div className="w-full max-w-md space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                      <FileText className="h-6 w-6 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground">Uploading...</p>
+                      <p className="text-sm text-muted-foreground truncate">
+                        {selectedFile.name}
+                      </p>
+                    </div>
+                  </div>
+                  <Progress value={uploadProgress} className="h-2" />
+                  <p className="text-center text-sm text-muted-foreground">
+                    {uploadProgress}% complete
+                  </p>
+                </div>
+              )}
+
+              {/* Processing State */}
+              {uploadStatus === 'processing' && (
+                <div className="flex flex-col items-center gap-4">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                    <Clock className="h-8 w-8 text-primary animate-spin" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-medium text-foreground">
+                      Processing...
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Extracting and categorizing transactions
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Completed State */}
+              {uploadStatus === 'completed' && uploadResult && (
+                <div className="flex flex-col items-center gap-4">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                    <CheckCircle className="h-8 w-8 text-primary" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-medium text-foreground">
+                      Upload Complete!
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {uploadResult.transactions} transactions from {uploadResult.bank} ({uploadResult.accountType}) successfully categorized
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Error State */}
+              {uploadStatus === 'error' && (
+                <div className="flex flex-col items-center gap-4">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
+                    <AlertCircle className="h-8 w-8 text-destructive" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-medium text-foreground">
+                      Upload Failed
+                    </p>
+                    <p className="text-sm text-destructive">
+                      {uploadError}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={handleClearFile}
+                    className="bg-transparent"
+                  >
+                    Try Again
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-card-foreground">Processing Stats</CardTitle>
+            <CardDescription>Overview of your uploaded statements</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg bg-primary/10 p-4">
+              <p className="text-sm text-muted-foreground">Total Statements</p>
+              <p className="text-3xl font-bold text-foreground">{stats.totalStatements}</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-4">
+              <p className="text-sm text-muted-foreground">Total Transactions</p>
+              <p className="text-3xl font-bold text-foreground">{stats.totalTransactions}</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-4">
+              <p className="text-sm text-muted-foreground">Total Chequing Statements</p>
+              <p className="text-3xl font-bold text-foreground">{stats.totalChequingStatements}</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-4">
+              <p className="text-sm text-muted-foreground">Total Credit Card Statements</p>
+              <p className="text-3xl font-bold text-foreground">{stats.totalCreditCardStatements}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-card-foreground">All Statements</CardTitle>
+              <CardDescription>View and manage your uploaded bank statements</CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={bankFilter} onValueChange={setBankFilter}>
+                <SelectTrigger className="w-[140px] bg-secondary/50 border-0">
+                  <SelectValue placeholder="Filter by bank" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Banks</SelectItem>
+                  <SelectItem value="bmo">BMO</SelectItem>
+                  <SelectItem value="scotiabank">Scotiabank</SelectItem>
+                  <SelectItem value="td">TD</SelectItem>
+                  <SelectItem value="cibc">CIBC</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={accountTypeFilter} onValueChange={setAccountTypeFilter}>
+                <SelectTrigger className="w-[160px] bg-secondary/50 border-0">
+                  <SelectValue placeholder="Filter by type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="chequing">Chequing</SelectItem>
+                  <SelectItem value="credit card">Credit Card</SelectItem>
+                </SelectContent>
+              </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="bg-transparent">
+                    <Calendar className="mr-2 h-4 w-4" />
+                    Date Range
+                    {(fromDate || toDate) && (
+                      <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
+                        {fromDate || toDate ? '1' : '0'}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80" align="end">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm">Filter by Upload Date</h4>
+                      <p className="text-xs text-muted-foreground">
+                        Select a date range to filter statements
+                      </p>
+                    </div>
+                    <div className="grid gap-3">
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="fromDate" className="text-xs">From Date</Label>
+                        <Input
+                          id="fromDate"
+                          type="date"
+                          value={fromDate}
+                          onChange={(e) => setFromDate(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="toDate" className="text-xs">To Date</Label>
+                        <Input
+                          id="toDate"
+                          type="date"
+                          value={toDate}
+                          onChange={(e) => setToDate(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                    </div>
+                    {(fromDate || toDate) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={clearDateFilters}
+                        className="w-full bg-transparent"
+                      >
+                        Clear Dates
+                      </Button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-lg border border-border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="text-muted-foreground">File Name</TableHead>
+                  <TableHead className="text-muted-foreground">Bank</TableHead>
+                  <TableHead className="text-muted-foreground">Account Type</TableHead>
+                  <TableHead className="text-muted-foreground">Upload Date</TableHead>
+                  <TableHead className="text-muted-foreground">Transactions</TableHead>
+                  <TableHead className="text-right text-muted-foreground">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredStatements.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                      No statements found matching your filters.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredStatements.map((statement) => (
+                    <TableRow key={statement.id} className="hover:bg-muted/30">
+                      <TableCell className="font-medium text-foreground">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          {statement.fileName}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-foreground">
+                        <Select
+                          value={statement.bank}
+                          onValueChange={(value) => handleBankChange(statement.id, value)}
+                        >
+                          <SelectTrigger className="w-[100px] h-8 bg-background border-input hover:bg-muted/50 cursor-pointer transition-colors">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="BMO" className="cursor-pointer hover:bg-muted">BMO</SelectItem>
+                            <SelectItem value="Scotiabank" className="cursor-pointer hover:bg-muted">Scotiabank</SelectItem>
+                            <SelectItem value="TD" className="cursor-pointer hover:bg-muted">TD</SelectItem>
+                            <SelectItem value="CIBC" className="cursor-pointer hover:bg-muted">CIBC</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="text-foreground">
+                        {statement.accountType}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(statement.uploadDate).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </TableCell>
+                      <TableCell className="text-foreground">{statement.transactions}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => handleDeleteClick(statement)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Statement</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete &quot;{statementToDelete?.fileName}&quot;? This action cannot be undone and will permanently remove the statement and its associated transactions.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="bg-transparent">
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
