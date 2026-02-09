@@ -1,5 +1,5 @@
 // API-driven expense service
-// All functions use fetch to hit /api/... endpoints
+// All functions call the backend API (default: http://localhost:8080)
 
 export interface Expense {
   id: string
@@ -50,6 +50,8 @@ export interface UpdateExpensePayload {
 
 // ============ Expense CRUD Service ============
 
+import { apiFetch, extractArray } from '@/lib/api/http'
+
 export async function listExpenses(
   filters?: ListExpensesFilters
 ): Promise<Expense[]> {
@@ -61,69 +63,44 @@ export async function listExpenses(
   if (filters?.status) params.set('status', filters.status)
 
   const queryString = params.toString()
-  const url = `/api/expenses${queryString ? `?${queryString}` : ''}`
-
-  const res = await fetch(url)
-  if (!res.ok) {
-    throw new Error(`Failed to fetch expenses: ${res.statusText}`)
-  }
-
-  const data = await res.json()
-  return data.expenses
+  const url = `/expenses${queryString ? `?${queryString}` : ''}`
+  const body = await apiFetch(url)
+  return extractArray<Expense>(body, 'expenses')
 }
 
 export async function createExpense(
   payload: CreateExpensePayload
-): Promise<Expense> {
-  const res = await fetch('/api/expenses', {
+): Promise<Expense[]> {
+  const body = await apiFetch('/expenses', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
 
-  if (!res.ok) {
-    throw new Error(`Failed to create expense: ${res.statusText}`)
-  }
-
-  return res.json()
+  // Enforce array response even for single created item
+  return extractArray<Expense>(body, 'expenses')
 }
 
 export async function updateExpense(
   id: string,
   payload: UpdateExpensePayload
-): Promise<Expense> {
-  const res = await fetch(`/api/expenses?id=${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+): Promise<Expense[]> {
+  const body = await apiFetch(`/expenses/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
     body: JSON.stringify(payload),
   })
 
-  if (!res.ok) {
-    throw new Error(`Failed to update expense: ${res.statusText}`)
-  }
-
-  return res.json()
+  return extractArray<Expense>(body, 'expenses')
 }
 
 export async function deleteExpense(id: string): Promise<void> {
-  const res = await fetch(`/api/expenses?id=${encodeURIComponent(id)}`, {
+  await apiFetch(`/expenses/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
-
-  if (!res.ok) {
-    throw new Error(`Failed to delete expense: ${res.statusText}`)
-  }
 }
 
 // ============ Categories Service ============
 
 export async function listCategories(): Promise<Category[]> {
-  const res = await fetch('/api/categories')
-
-  if (!res.ok) {
-    throw new Error(`Failed to fetch categories: ${res.statusText}`)
-  }
-
-  const data = await res.json()
-  return data.categories
+  const body = await apiFetch('/categories')
+  return extractArray<Category>(body, 'categories')
 }

@@ -67,67 +67,9 @@ import {
 } from 'recharts'
 import { cn } from '@/lib/utils'
 import { parseDateString } from '@/lib/calendar-utils'
+import { SpendingHeatmap } from '@/components/spending-heatmap'
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json())
-
-interface ReportsData {
-  stats: {
-    totalIncome: number
-    totalExpenses: number
-    netSavings: number
-    savingsRate: number
-    avgDailySpend: number
-    highestCategory: string
-    incomeChange: number
-    expenseChange: number
-    savingsChange: number
-  }
-  categoryDistribution: {
-    name: string
-    value: number
-    color: string
-    budget: number
-  }[]
-  spendingTrend: Record<string, { date: string; amount: number }[]>
-  profitLossTrend: Record<string, { date: string; income: number; expense: number; netProfitLoss: number }[]>
-  incomeVsExpenses: {
-    month: string
-    income: number
-    expenses: number
-    netProfit: number
-  }[]
-  budgetComparison: {
-    category: string
-    budgeted: number
-    spent: number
-    remaining: number
-    progress: number
-  }[]
-  insights: { id: string; text: string; type: string }[]
-  suggestions: { id: string; text: string; type: string }[]
-  categoryDrilldown: Record<string, {
-    total: number
-    avgTransaction: number
-    weeklyData: { week: string; amount: number }[]
-    topMerchants: { name: string; amount: number; count: number }[]
-  }>
-  topTransactions: {
-    id: string
-    date: string
-    merchant: string
-    category: string
-    payment: string
-    amount: number
-    tag: string
-  }[]
-  heatmapData: {
-    date: string
-    day: number
-    dayOfWeek: number
-    amount: number
-    intensity: string
-  }[]
-}
+import { getReports, type ReportsData } from '@/lib/services/reports'
 
 const CHART_COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#eab308', '#a855f7', '#6b7280']
 
@@ -203,14 +145,14 @@ export default function ReportsPage() {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [paymentFilter, setPaymentFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortField, setSortField] = useState<'date' | 'amount'>('amount')
+  const [sortField, setSortField] = useState<'date' | 'amount' | 'merchant' | 'category' | 'payment'>('amount')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [trendPeriod, setTrendPeriod] = useState<'7D' | '30D' | '3M' | '1Y'>('30D')
   const [profitLossPeriod, setProfitLossPeriod] = useState<'7D' | '30D' | '3M' | '1Y'>('30D')
   const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined)
   const [selectedCategory, setSelectedCategory] = useState<string>('Food')
 
-  const { data, isLoading } = useSWR<ReportsData>('/api/reports', fetcher)
+  const { data, isLoading } = useSWR<ReportsData>('reports', getReports)
 
   const onPieEnter = useCallback((_: unknown, index: number) => setActivePieIndex(index), [])
   const onPieLeave = useCallback(() => setActivePieIndex(undefined), [])
@@ -235,7 +177,7 @@ export default function ReportsPage() {
   const suggestions = data?.suggestions ?? []
   const categoryDrilldown = data?.categoryDrilldown ?? {}
   const topTransactions = data?.topTransactions ?? []
-  const heatmapData = data?.heatmapData ?? []
+  const heatmapData: Record<string, { amount: number; intensity: string }> = data?.heatmapData ?? {}
 
   const filteredTransactions = useMemo(() => {
     let result = [...topTransactions]
@@ -253,12 +195,17 @@ export default function ReportsPage() {
       if (sortField === 'date') {
         return sortOrder === 'asc' ? parseDateString(a.date).getTime() - parseDateString(b.date).getTime() : parseDateString(b.date).getTime() - parseDateString(a.date).getTime()
       }
+      if (sortField === 'merchant' || sortField === 'category' || sortField === 'payment') {
+        const aVal = a[sortField].toLowerCase()
+        const bVal = b[sortField].toLowerCase()
+        return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal)
+      }
       return sortOrder === 'asc' ? a.amount - b.amount : b.amount - a.amount
     })
     return result
   }, [topTransactions, categoryFilter, paymentFilter, searchQuery, sortField, sortOrder])
 
-  const toggleSort = (field: 'date' | 'amount') => {
+  const toggleSort = (field: 'date' | 'amount' | 'merchant' | 'category' | 'payment') => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
     } else {
@@ -291,42 +238,42 @@ export default function ReportsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger className="w-[140px] h-9">
-              <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectTrigger className="w-[180px] h-9">
+              <Calendar className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="month">This Month</SelectItem>
-              <SelectItem value="last-month">Last Month</SelectItem>
-              <SelectItem value="3-months">Last 3 Months</SelectItem>
               <SelectItem value="custom">Custom</SelectItem>
+              <SelectItem value="3-months">Last 3 Months</SelectItem>
+              <SelectItem value="last-month">Last Month</SelectItem>
+              <SelectItem value="month">This Month</SelectItem>
             </SelectContent>
           </Select>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[130px] h-9">
+            <SelectTrigger className="w-[160px] h-9">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Categories</SelectItem>
+              <SelectItem value="bills">Bills</SelectItem>
               <SelectItem value="food">Food</SelectItem>
-              <SelectItem value="travel">Travel</SelectItem>
-              <SelectItem value="office">Office</SelectItem>
               <SelectItem value="fuel">Fuel</SelectItem>
               <SelectItem value="marketing">Marketing</SelectItem>
-              <SelectItem value="bills">Bills</SelectItem>
+              <SelectItem value="office">Office</SelectItem>
               <SelectItem value="shopping">Shopping</SelectItem>
+              <SelectItem value="travel">Travel</SelectItem>
             </SelectContent>
           </Select>
           <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-            <SelectTrigger className="w-[140px] h-9">
+            <SelectTrigger className="w-[160px] h-9">
               <SelectValue placeholder="Payment" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Methods</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="card">Card</SelectItem>
-              <SelectItem value="upi">UPI</SelectItem>
               <SelectItem value="bank transfer">Bank Transfer</SelectItem>
+              <SelectItem value="card">Card</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
+              <SelectItem value="upi">UPI</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="outline" size="sm" onClick={resetFilters} className="h-9 bg-transparent">
@@ -827,7 +774,7 @@ export default function ReportsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {Object.keys(categoryDrilldown).map((cat) => (
+                {Object.keys(categoryDrilldown).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())).map((cat) => (
                   <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                 ))}
               </SelectContent>
@@ -967,9 +914,38 @@ export default function ReportsPage() {
         <CardHeader className="pb-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-base font-semibold">Top Transactions</CardTitle>
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search transactions..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 h-9 bg-secondary/50 border-0" />
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-[160px] h-9 bg-secondary/50 border-0">
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="bills">Bills</SelectItem>
+                  <SelectItem value="food">Food</SelectItem>
+                  <SelectItem value="fuel">Fuel</SelectItem>
+                  <SelectItem value="marketing">Marketing</SelectItem>
+                  <SelectItem value="office">Office</SelectItem>
+                  <SelectItem value="shopping">Shopping</SelectItem>
+                  <SelectItem value="travel">Travel</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+                <SelectTrigger className="w-[160px] h-9 bg-secondary/50 border-0">
+                  <SelectValue placeholder="Payment" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Methods</SelectItem>
+                  <SelectItem value="bank transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="upi">UPI</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="relative w-full sm:w-56">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search transactions..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 h-9 bg-secondary/50 border-0" />
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -979,15 +955,27 @@ export default function ReportsPage() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[100px]">
                   <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('date')}>
-                    Date <ArrowUpDown className="h-3 w-3" />
+                    Date <ArrowUpDown className={cn("h-3 w-3", sortField === 'date' && "text-foreground")} />
                   </button>
                 </TableHead>
-                <TableHead>Merchant</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Payment</TableHead>
+                <TableHead>
+                  <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('merchant')}>
+                    Merchant <ArrowUpDown className={cn("h-3 w-3", sortField === 'merchant' && "text-foreground")} />
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('category')}>
+                    Category <ArrowUpDown className={cn("h-3 w-3", sortField === 'category' && "text-foreground")} />
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('payment')}>
+                    Payment <ArrowUpDown className={cn("h-3 w-3", sortField === 'payment' && "text-foreground")} />
+                  </button>
+                </TableHead>
                 <TableHead className="text-right">
                   <button className="flex items-center gap-1 ml-auto hover:text-foreground" onClick={() => toggleSort('amount')}>
-                    Amount <ArrowUpDown className="h-3 w-3" />
+                    Amount <ArrowUpDown className={cn("h-3 w-3", sortField === 'amount' && "text-foreground")} />
                   </button>
                 </TableHead>
               </TableRow>
@@ -1018,35 +1006,10 @@ export default function ReportsPage() {
       <Card className="border-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold">Spending Heatmap</CardTitle>
-          <p className="text-xs text-muted-foreground">Daily spending intensity over the past month</p>
+          <p className="text-xs text-muted-foreground">Daily spending intensity over the past year</p>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-7 gap-1.5">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-              <div key={d} className="text-center text-xs text-muted-foreground py-1">{d}</div>
-            ))}
-            {heatmapData.map((cell) => (
-              <div
-                key={cell.date}
-                className={cn(
-                  "aspect-square rounded-md flex items-center justify-center text-[10px] font-medium transition-colors cursor-pointer",
-                  cell.intensity === 'none' && 'bg-secondary/30 text-muted-foreground',
-                  cell.intensity === 'low' && 'bg-emerald-500/20 text-emerald-600',
-                  cell.intensity === 'medium' && 'bg-amber-500/30 text-amber-600',
-                  cell.intensity === 'high' && 'bg-rose-500/40 text-rose-600'
-                )}
-                title={`${cell.date}: $${cell.amount}`}
-              >
-                {cell.day}
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center justify-center gap-4 mt-4 pt-4 border-t border-border">
-            <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded bg-secondary/30" /><span className="text-xs text-muted-foreground">None</span></div>
-            <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded bg-emerald-500/20" /><span className="text-xs text-muted-foreground">Low</span></div>
-            <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded bg-amber-500/30" /><span className="text-xs text-muted-foreground">Medium</span></div>
-            <div className="flex items-center gap-1.5"><div className="h-3 w-3 rounded bg-rose-500/40" /><span className="text-xs text-muted-foreground">High</span></div>
-          </div>
+          <SpendingHeatmap data={heatmapData} />
         </CardContent>
       </Card>
     </div>

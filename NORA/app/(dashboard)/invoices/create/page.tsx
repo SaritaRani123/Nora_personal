@@ -67,8 +67,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
-import { contacts } from '@/lib/mock-data'
-import { useDataStore } from '@/lib/data-store'
+import useSWR, { mutate } from 'swr'
+import { listContacts, createContact, type Contact as ApiContact } from '@/lib/services/contacts'
+import { listInvoices, createInvoice, updateInvoice, type Invoice } from '@/lib/services/invoices'
+
+// Helper function for case-insensitive alphabetical sorting
+const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => {
+    const nameA = (a.name || a.label || '').toLowerCase()
+    const nameB = (b.name || b.label || '').toLowerCase()
+    return nameA.localeCompare(nameB)
+  })
+}
 
 interface TaxRate {
   id: string
@@ -163,11 +173,13 @@ function CreateInvoiceContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const invoicePreviewRef = useRef<HTMLDivElement>(null)
-  const { addInvoice, invoices, updateInvoice } = useDataStore()
+  const { data: invoices = [] } = useSWR<Invoice[]>('invoices', () => listInvoices())
+  const { data: contacts = [] } = useSWR<ApiContact[]>('contacts', () => listContacts())
 
-  // Check if we're in edit mode
   const isEditMode = searchParams.get('edit') === 'true'
   const editInvoiceId = searchParams.get('id')
+  const fromWorkIds: string[] = []
+  const fromWorkEntries: { contact?: string; description?: string; amount?: number; hours?: number; rate?: number }[] = []
 
   // Step management
   const [currentStep, setCurrentStep] = useState<Step>('form')
@@ -215,7 +227,7 @@ function CreateInvoiceContent() {
     summary: 'Thank you for your business',
   })
 
-  // Contact - initialize from URL params if editing
+  // Contact - initialize from URL params if editing or from work done entries
   const [selectedContact, setSelectedContact] = useState<Contact | null>(() => {
     if (isEditMode) {
       const client = searchParams.get('client')
@@ -228,6 +240,30 @@ function CreateInvoiceContent() {
           phone: '',
           address: '',
         }
+      }
+    }
+    // Auto-fill contact from work done entries
+    if (fromWorkEntries.length > 0 && fromWorkEntries[0].contact) {
+      const contactName = fromWorkEntries[0].contact
+      const matchedContact = contacts.find(
+        (c) => c.name.toLowerCase() === contactName.toLowerCase()
+      )
+      if (matchedContact) {
+        return {
+          id: matchedContact.id,
+          name: matchedContact.name,
+          email: matchedContact.email,
+          phone: matchedContact.phone || '',
+          address: matchedContact.address || '',
+        }
+      }
+      // If no exact match, create a minimal contact entry
+      return {
+        id: `work-contact-${Date.now()}`,
+        name: contactName,
+        email: '',
+        phone: '',
+        address: '',
       }
     }
     return null
@@ -261,13 +297,28 @@ function CreateInvoiceContent() {
     }
   })
 
-  // Line items - initialize from URL params if editing
+  // Line items - initialize from URL params if editing, or from work done entries
   const [lineItems, setLineItems] = useState<LineItem[]>(() => {
     if (isEditMode) {
       const amount = parseFloat(searchParams.get('amount') || '0')
       return [
         { id: '1', itemType: 'item', item: 'Invoice Amount', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: amount, taxId: null, description: '' },
       ]
+    }
+    // Auto-fill line items from work done entries
+    if (fromWorkEntries.length > 0) {
+      return fromWorkEntries.map((entry, idx) => ({
+        id: String(idx + 1),
+        itemType: 'hourly' as ItemType,
+        item: entry.description || 'Work Done',
+        quantity: 1,
+        unit: 'hrs',
+        hours: Math.floor(entry.hours),
+        minutes: Math.round((entry.hours % 1) * 60),
+        price: entry.rate,
+        taxId: null,
+        description: `${entry.date} - ${entry.contact || 'Work'}`,
+      }))
     }
     return [
       { id: '1', itemType: 'item', item: '', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 0, taxId: null, description: '' },
@@ -460,12 +511,14 @@ function CreateInvoiceContent() {
     // Previous month's trailing days (greyed out)
     for (let i = 0; i < firstDay; i++) {
       const day = daysInPrevMonth - firstDay + i + 1
+      const dayOfWeek = i % 7
+      const weekend = isWeekend(dayOfWeek)
       days.push(
         <button
           key={`prev-${i}`}
           type="button"
           onClick={() => handleInvoiceDateSelect(day, prevMonth, prevYear)}
-          className="h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors"
+          className={`h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors ${weekend ? 'bg-foreground/[0.03]' : ''}`}
         >
           {day}
         </button>
@@ -487,7 +540,7 @@ function CreateInvoiceContent() {
           className={`h-8 w-8 rounded-md text-sm font-medium transition-colors
             ${selected ? 'bg-primary text-primary-foreground' : ''}
             ${!selected && today ? 'bg-accent text-accent-foreground ring-1 ring-primary' : ''}
-            ${!selected && !today && weekend ? 'text-rose-500' : ''}
+            ${!selected && !today && weekend ? 'bg-foreground/[0.04] border border-border/30' : ''}
             ${!selected && !today && !weekend ? 'text-foreground hover:bg-muted' : ''}
             ${!selected ? 'hover:bg-muted' : ''}
           `}
@@ -497,19 +550,22 @@ function CreateInvoiceContent() {
       )
     }
 
-    // Next month's leading days (greyed out) to fill out the grid
-    const totalCells = days.length
-    const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7)
+    // Next month's leading days (greyed out) to fill out 6 rows (42 cells) for consistent height
+    const totalCells = 42 // Always 6 rows
+    const currentCells = days.length
+    const remainingCells = totalCells - currentCells
     const nextMonth = invoiceDateCalendarMonth.month === 11 ? 0 : invoiceDateCalendarMonth.month + 1
     const nextYear = invoiceDateCalendarMonth.month === 11 ? invoiceDateCalendarMonth.year + 1 : invoiceDateCalendarMonth.year
 
     for (let i = 1; i <= remainingCells; i++) {
+      const dayOfWeek = (currentCells + i - 1) % 7
+      const weekend = isWeekend(dayOfWeek)
       days.push(
         <button
           key={`next-${i}`}
           type="button"
           onClick={() => handleInvoiceDateSelect(i, nextMonth, nextYear)}
-          className="h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors"
+          className={`h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors ${weekend ? 'bg-foreground/[0.03]' : ''}`}
         >
           {i}
         </button>
@@ -551,12 +607,14 @@ function CreateInvoiceContent() {
     // Previous month's trailing days (greyed out)
     for (let i = 0; i < firstDay; i++) {
       const day = daysInPrevMonth - firstDay + i + 1
+      const dayOfWeek = i % 7
+      const weekend = isWeekend(dayOfWeek)
       days.push(
         <button
           key={`prev-${i}`}
           type="button"
           onClick={() => handleDateSelect(day, prevMonth, prevYear)}
-          className="h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors"
+          className={`h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors ${weekend ? 'bg-foreground/[0.03]' : ''}`}
         >
           {day}
         </button>
@@ -578,7 +636,7 @@ function CreateInvoiceContent() {
           className={`h-8 w-8 rounded-md text-sm font-medium transition-colors
             ${selected ? 'bg-primary text-primary-foreground' : ''}
             ${!selected && today ? 'bg-accent text-accent-foreground ring-1 ring-primary' : ''}
-            ${!selected && !today && weekend ? 'text-rose-500' : ''}
+            ${!selected && !today && weekend ? 'bg-foreground/[0.04] border border-border/30' : ''}
             ${!selected && !today && !weekend ? 'text-foreground hover:bg-muted' : ''}
             ${!selected ? 'hover:bg-muted' : ''}
           `}
@@ -588,19 +646,22 @@ function CreateInvoiceContent() {
       )
     }
 
-    // Next month's leading days (greyed out) to fill out the grid
-    const totalCells = days.length
-    const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7)
+    // Next month's leading days (greyed out) to fill out 6 rows (42 cells) for consistent height
+    const totalCells = 42 // Always 6 rows
+    const currentCells = days.length
+    const remainingCells = totalCells - currentCells
     const nextMonth = calendarMonth.month === 11 ? 0 : calendarMonth.month + 1
     const nextYear = calendarMonth.month === 11 ? calendarMonth.year + 1 : calendarMonth.year
 
     for (let i = 1; i <= remainingCells; i++) {
+      const dayOfWeek = (currentCells + i - 1) % 7
+      const weekend = isWeekend(dayOfWeek)
       days.push(
         <button
           key={`next-${i}`}
           type="button"
           onClick={() => handleDateSelect(i, nextMonth, nextYear)}
-          className="h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors"
+          className={`h-8 w-8 rounded-md text-sm font-medium text-muted-foreground/50 hover:bg-muted transition-colors ${weekend ? 'bg-foreground/[0.03]' : ''}`}
         >
           {i}
         </button>
@@ -698,13 +759,9 @@ function CreateInvoiceContent() {
     setSendEmail((prev) => ({ ...prev, to: contact.email }))
     setIsContactModalOpen(false)
     
-    // Save to contacts API so it appears in contacts table
     try {
-      await fetch('/api/contacts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newContact),
-      })
+      await createContact({ name: newContact.name, email: newContact.email, phone: newContact.phone, address: newContact.address })
+      await mutate('contacts')
     } catch (error) {
       console.error('Failed to save contact:', error)
     }
@@ -1036,7 +1093,7 @@ function CreateInvoiceContent() {
 
     const newInvoiceData = {
       id: invoiceDetails.invoiceNumber,
-      client: selectedContact?.name || 'Unknown Client',
+      client: selectedContact?.name || 'Unknown Contact',
       email: selectedContact?.email || sendEmail.to,
       amount: total,
       status: 'pending' as const,
@@ -1047,15 +1104,8 @@ function CreateInvoiceContent() {
       colorPalette: activeColors,
     }
     
-    addInvoice(newInvoiceData)
-    
-    // Also POST to API for calendar sync
-    await fetch('/api/invoices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newInvoiceData),
-    })
-
+    await createInvoice(newInvoiceData)
+    await mutate('invoices')
     setIsSending(false)
     setIsSendModalOpen(false)
   }
@@ -1070,7 +1120,7 @@ function CreateInvoiceContent() {
   const handleSaveInvoice = async () => {
     const invoiceData = {
       id: isEditMode && editInvoiceId ? editInvoiceId : invoiceDetails.invoiceNumber,
-      client: selectedContact?.name || 'Unknown Client',
+      client: selectedContact?.name || 'Unknown Contact',
       email: selectedContact?.email || '',
       amount: total,
       status: mapInvoiceStateToStatus(invoiceState),
@@ -1082,23 +1132,11 @@ function CreateInvoiceContent() {
     }
     
     if (isEditMode && editInvoiceId) {
-      // Update existing invoice in data store
-      updateInvoice(editInvoiceId, invoiceData)
-      // Also update via API for calendar sync
-      await fetch('/api/invoices', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invoiceData),
-      })
+      await updateInvoice(editInvoiceId, invoiceData)
+      await mutate('invoices')
     } else {
-      // Add new invoice to data store
-      addInvoice(invoiceData)
-      // Also add via API for calendar sync
-      await fetch('/api/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invoiceData),
-      })
+      await createInvoice(invoiceData)
+      await mutate('invoices')
     }
     router.push('/invoices')
   }
@@ -1756,7 +1794,7 @@ function CreateInvoiceContent() {
                 </TabsList>
                 <TabsContent value="existing" className="space-y-2 pt-3">
                   <div className="max-h-60 overflow-y-auto space-y-2">
-                    {existingContacts.map((contact) => (
+                    {sortAlphabetically(existingContacts).map((contact) => (
                       <button key={contact.id} type="button" onClick={() => handleSelectExistingContact(contact.id)} className="w-full rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted">
                         <p className="font-medium text-foreground">{contact.name}</p>
                         <p className="text-sm text-muted-foreground">{contact.email}</p>

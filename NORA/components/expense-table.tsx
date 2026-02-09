@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Sparkles, Pencil, ChevronDown, Calendar, Filter, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
 import { parseDateString } from '@/lib/calendar-utils'
+import useSWR from 'swr'
 import {
   Table,
   TableBody,
@@ -27,7 +28,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { expenses, categories } from '@/lib/mock-data'
+import { listCategories, listExpenses, type Category, type Expense } from '@/lib/services/expenses'
+
+// Helper function for case-insensitive alphabetical sorting
+const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => {
+    const nameA = (a.name || a.label || '').toLowerCase()
+    const nameB = (b.name || b.label || '').toLowerCase()
+    return nameA.localeCompare(nameB)
+  })
+}
 
 const statusConfig = {
   paid: { label: 'Paid', icon: CheckCircle2, color: 'text-success bg-success/10' },
@@ -38,9 +48,13 @@ const statusConfig = {
 export function ExpenseTable() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
 
-  const filteredExpenses = categoryFilter === 'all' 
-    ? expenses 
-    : expenses.filter(e => e.category === categoryFilter)
+  const { data: expenses = [] } = useSWR<Expense[]>('dashboard-expenses', () => listExpenses())
+  const { data: categories = [] } = useSWR<Category[]>('dashboard-categories', () => listCategories())
+
+  const filteredExpenses =
+    categoryFilter === 'all'
+      ? expenses
+      : expenses.filter((e) => e.category === categoryFilter)
 
   const getCategoryName = (categoryId: string) => {
     return categories.find(c => c.id === categoryId)?.name || categoryId
@@ -62,7 +76,7 @@ export function ExpenseTable() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                {categories.map((cat) => (
+                {sortAlphabetically(categories).map((cat) => (
                   <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -110,7 +124,7 @@ export function ExpenseTable() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent>
-                          {categories.map((cat) => (
+                          {sortAlphabetically(categories).map((cat) => (
                             <DropdownMenuItem key={cat.id}>{cat.name}</DropdownMenuItem>
                           ))}
                         </DropdownMenuContent>

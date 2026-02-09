@@ -294,26 +294,34 @@ const topTransactions = [
   { id: '12', date: '2025-01-05', merchant: 'Uber', category: 'Travel', payment: 'UPI', amount: 32, tag: 'low' },
 ]
 
-// Generate spending heatmap data for current month
+// Generate spending heatmap data for ~12 months
 const generateHeatmapData = () => {
-  const data = []
+  const data: Record<string, { amount: number; intensity: string }> = {}
   const today = new Date()
-  const year = today.getFullYear()
-  const month = today.getMonth()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(year, month, day)
-    if (date <= today) {
-      // Generate random spending between 50 and 800
-      const amount = Math.floor(Math.random() * 750) + 50
-      data.push({
-        date: date.toISOString().split('T')[0],
-        day,
-        dayOfWeek: date.getDay(),
+  // Go back ~52 weeks
+  const start = new Date(today)
+  start.setDate(start.getDate() - 364)
+  // Align start to Sunday
+  start.setDate(start.getDate() - start.getDay())
+
+  // Use a seeded random so values stay consistent per date
+  const seededRandom = (seed: number) => {
+    const x = Math.sin(seed) * 10000
+    return x - Math.floor(x)
+  }
+
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    const key = d.toISOString().split('T')[0]
+    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+    // ~30% chance of no spending
+    if (seededRandom(seed) < 0.3) {
+      data[key] = { amount: 0, intensity: 'none' }
+    } else {
+      const amount = Math.floor(seededRandom(seed + 1) * 750) + 50
+      data[key] = {
         amount,
         intensity: amount < 150 ? 'low' : amount < 400 ? 'medium' : amount < 600 ? 'high' : 'very-high',
-      })
+      }
     }
   }
   return data

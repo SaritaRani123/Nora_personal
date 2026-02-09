@@ -1,82 +1,53 @@
-# NORA — Business Tracker
+# Nora (Frontend)
 
-## Project Overview and Purpose
+**Frontend only.** This folder contains the React + Next.js UI for Nora. The API runs in a separate project: **Nora-Backend/**.
 
-NORA is an AI-powered business expense and finance tracking application. It provides a frontend UI for managing expenses, invoices, contacts, bank statements, income, and reports. The application uses **Next.js** with **mock APIs** (Next.js API routes backed by in-memory or mock data) so the frontend can be developed and tested without a real backend.
+- **Nora/** (this folder): frontend — runs on port **3000**
+- **Nora-Backend/**: backend API — runs on port **8080**
 
-The project is structured as a single Next.js app: the frontend and mock API routes run together. There is no separate backend server; all API endpoints live under `/api/*` and are served by the same Next.js process.
+## Running locally
 
----
-
-## Main Features
-
-| Feature | Description |
-|--------|-------------|
-| **Dashboard** | Overview with stats (income, expenses, net profit), payable/owing summary, income vs expense chart, and category distribution chart. |
-| **Bank Statements** | Upload PDF statements (mock), list statements with bank/account type, filter by bank/account/date. |
-| **Expenses** | List, filter (category, status, date range), add, edit expenses; category chart; export to CSV. |
-| **Invoices** | List invoices, create/edit with templates and color palettes, view preview, download PDF, duplicate, delete. |
-| **Contacts** | CRUD for contacts (name, email, phone, address). |
-| **Calendar** | Calendar view of expenses, income, invoices, and events; create/edit/delete events; filter by type. |
-| **Reports** | Analytics: stats, category distribution, spending trends, profit/loss, budget comparison, insights, heatmap. |
-| **Settings** | App settings page (placeholder). |
-| **Auth (mock)** | Sign-in / sign-up and onboarding flow (no real authentication; redirects to dashboard). |
-
----
-
-## How to Run the Frontend and Mock APIs
-
-The frontend and mock APIs run together as one Next.js application.
-
-### Prerequisites
-
-- **Node.js** (v18+ recommended)
-- **pnpm** (or npm/yarn — the project uses `pnpm-lock.yaml`)
-
-### Install Dependencies
+1. Install dependencies:
 
 ```bash
-pnpm install
+npm install
 ```
 
-### Development (frontend + mock APIs)
+2. Create an environment file (optional but recommended):
+
+Create `.env.local` in this folder:
 
 ```bash
-pnpm dev
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 ```
 
-- App: **http://localhost:3000**
-- Root (`/`) redirects to **/dashboard**
-- All mock APIs are under **http://localhost:3000/api/** (e.g. `/api/expenses`, `/api/invoices`).
-
-### Production Build and Run
+3. Start the frontend (runs on **port 3000** by default):
 
 ```bash
-pnpm build
-pnpm start
+npm run dev
 ```
 
-- Serves the built app and API routes on port **3000** (or `PORT` if set).
+Open `http://localhost:3000`.
 
-### Lint
+**Note:** Start the backend first (see Nora-Backend/README.md). If the backend is not running on port 8080, API calls will fail.
 
-```bash
-pnpm lint
-```
+## Backend API
 
----
+- The frontend fetches data from the backend at **`http://localhost:8080`** (configurable via `NEXT_PUBLIC_API_BASE_URL`).
+- All data consumed by the UI is fetched via `Nora/lib/services/*`.
+- All API responses are expected/handled in **array form** (even single items).
 
-## Dependencies and Notes
+See `API.md` for the complete endpoint list and examples.
 
-- **Framework:** Next.js 16 (App Router).
-- **UI:** React 19, Radix UI components, Tailwind CSS, shadcn/ui-style components in `components/ui/`.
-- **Data fetching:** SWR for client-side API calls; some pages use Zustand (`lib/data-store.ts`) for client state (e.g. invoices list).
-- **Mock data:** Seeded in `lib/mock-data.ts` and in-memory in API route handlers; data does not persist across server restarts.
-- **Charts:** Recharts.
-- **Forms:** React Hook Form, Zod, `@hookform/resolvers`.
-- **PDF:** jsPDF for invoice PDF download; html2canvas available.
-- **Package manager:** pnpm (see `pnpm-lock.yaml`).
+**Run the backend first** (from `Nora-Backend/`: `npm install` then `npm start`) so the frontend can load data from `http://localhost:8080`.
 
-For a full list of dependencies, environment setup, and prerequisites, see **agent-specs/requirements.md**.  
-For API endpoints and request/response formats, see **agent-specs/apis.md**.  
-For pages, components, and navigation, see **agent-specs/frontend.md**.
+## Folder structure (high level)
+
+- **`app/`**: Next.js routes (App Router)
+  - **`(dashboard)/`**: dashboard pages (URLs reflect feature routes like `/expenses`, `/invoices`, etc.)
+- **`components/`**: reusable UI and feature components
+  - **`components/ui/`**: shared UI primitives
+- **`lib/api/`**: API client helpers (`apiFetch`, array extraction)
+- **`lib/services/`**: backend-facing service modules used by pages/components
+- **`types/`**: shared TypeScript types
+

@@ -74,6 +74,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { DatePicker } from '@/components/ui/date-picker'
 import {
   Select,
   SelectContent,
@@ -85,6 +86,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   DropdownMenuCheckboxItem,
@@ -106,56 +108,25 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
 import { useToast } from '@/hooks/use-toast'
+import { useDataStore } from '@/lib/data-store'
 import { getPaymentMethodById } from '@/lib/services/expense-service'
 import type { ExpenseCreatePayload, ExpenseUpdatePayload } from '@/types/expense'
 
-// API fetcher for SWR
-const fetcher = (url: string) => fetch(url).then(res => {
-  if (!res.ok) throw new Error('Failed to fetch data')
-  return res.json()
-})
-
-// API response types
-interface ExpenseFromAPI {
-  id: string
-  date: string
-  description: string
-  category: string
-  amount: number
-  paymentMethod: string
-  status?: string
-}
-
-interface InvoiceFromAPI {
-  id: string
-  client: string
-  email: string
-  amount: number
-  status: 'paid' | 'pending' | 'overdue' | 'draft'
-  issueDate: string
-  dueDate: string
-  paidDate: string | null
-}
-
-interface IncomeFromAPI {
-  id: string
-  date: string
-  description: string
-  amount: number
-  source: string
-  client?: string
-}
+import { listInvoices, type Invoice } from '@/lib/services/invoices'
+import { listContacts } from '@/lib/services/contacts'
 
 const eventTypeConfig = {
-  work: { label: 'Work Done', icon: Clock, color: 'bg-primary text-primary-foreground', dotColor: 'bg-primary' },
+  work: { label: 'Work Done', icon: Briefcase, color: 'bg-primary text-primary-foreground', dotColor: 'bg-primary' },
+  time: { label: 'Time', icon: Clock, color: 'bg-chart-3 text-chart-3-foreground', dotColor: 'bg-chart-3' },
   expense: { label: 'Expense', icon: Receipt, color: 'bg-destructive/90 text-destructive-foreground', dotColor: 'bg-destructive' },
   income: { label: 'Income', icon: DollarSign, color: 'bg-success text-success-foreground', dotColor: 'bg-success' },
   invoice: { label: 'Invoice', icon: FileCheck, color: 'bg-chart-2 text-white', dotColor: 'bg-chart-2' },
   meeting: { label: 'Meeting', icon: Users, color: 'bg-chart-4 text-chart-4-foreground', dotColor: 'bg-chart-4' },
-  travel: { label: 'Travel', icon: Car, color: 'bg-chart-5 text-chart-5-foreground', dotColor: 'bg-chart-5' },
+  travel: { label: 'Travels', icon: Car, color: 'bg-chart-5 text-chart-5-foreground', dotColor: 'bg-chart-5' },
+  note: { label: 'Note', icon: FileText, color: 'bg-muted text-muted-foreground', dotColor: 'bg-muted-foreground' },
   tax: { label: 'Tax', icon: Landmark, color: 'bg-orange-500 text-white', dotColor: 'bg-orange-500' },
   overdue: { label: 'Overdue', icon: AlertTriangle, color: 'bg-destructive text-destructive-foreground', dotColor: 'bg-destructive' },
-}
+  }
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = [
@@ -190,6 +161,15 @@ const PAYMENT_METHODS = [
   { id: 'paypal', label: 'PayPal' },
 ]
 
+// Helper function for case-insensitive alphabetical sorting
+const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => {
+    const nameA = (a.name || a.label || '').toLowerCase()
+    const nameB = (b.name || b.label || '').toLowerCase()
+    return nameA.localeCompare(nameB)
+  })
+}
+
 type ViewMode = 'month' | 'week' | 'agenda'
 
 interface FilterState {
@@ -212,6 +192,7 @@ interface CalendarEvent {
   kilometers?: number
   paymentMethod?: string
   taxDeductible?: boolean
+  notes?: string
 }
 
 // Upcoming event type configuration (derived from API data)
@@ -242,6 +223,7 @@ const normalizePaymentMethod = (method: string): string => {
 
 export default function CalendarPage() {
   const { toast } = useToast()
+  const { addWorkDoneEntry } = useDataStore()
   
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(() => new Date())
@@ -304,17 +286,14 @@ export default function CalendarPage() {
     expensesFetcher
   )
 
-  // Fetch invoices and income from APIs
-  const { data: invoicesData, error: invoicesError, isLoading: invoicesLoading } = useSWR<{ invoices: InvoiceFromAPI[] }>('/api/invoices', fetcher)
-  const { data: incomeData, error: incomeError, isLoading: incomeLoading } = useSWR<{ income: IncomeFromAPI[] }>('/api/income', fetcher)
+  // Fetch invoices and income from backend
+  const { data: invoicesData, error: invoicesError, isLoading: invoicesLoading } = useSWR<Invoice[]>('invoices', listInvoices)
 
-  // Combined loading and error states
-  const isLoading = expensesLoading || invoicesLoading || incomeLoading
-  const hasError = expensesError || invoicesError || incomeError
+  const isLoading = expensesLoading || invoicesLoading
+  const hasError = expensesError || invoicesError
 
-  // Extract data from API responses
-  const invoices = invoicesData?.invoices || []
-  const income = incomeData?.income || []
+  const invoices = invoicesData ?? []
+  const income: { id: string; date: string; description: string; amount: number; client?: string }[] = []
 
   // Local state for calendar-only events (meetings, work, travel that don't map to expenses/invoices)
   const [localEvents, setLocalEvents] = useState<CalendarEvent[]>([])
@@ -357,31 +336,11 @@ export default function CalendarPage() {
       }
     })
 
-    // Normalize income from /api/income into calendar events
-    income.forEach((inc) => {
-      // Check if already added from invoices to avoid duplicates
-      const alreadyExists = events.some(e => 
-        e.type === 'income' && 
-        e.date === inc.date && 
-        e.amount === inc.amount
-      )
-      if (!alreadyExists) {
-        events.push({
-          id: `income-${inc.id}`,
-          title: inc.description,
-          date: inc.date,
-          type: 'income',
-          amount: inc.amount,
-          client: inc.client,
-        })
-      }
-    })
-
     // Add local events (meetings, work, travel added via calendar UI)
     events.push(...localEvents)
 
     return events
-  }, [expenses, invoices, income, localEvents, isLoading])
+  }, [expenses, invoices, localEvents, isLoading])
 
   // State for adding new client inline
   const [isAddingClient, setIsAddingClient] = useState(false)
@@ -403,19 +362,24 @@ export default function CalendarPage() {
     setContacts(prev => [...prev, newContact])
   }
   
-  // Advanced filter state
-  const [filters, setFilters] = useState<FilterState>({
-    types: ['work', 'expense', 'income', 'invoice', 'meeting', 'travel', 'tax'],
-    categories: [],
-    clients: [],
-    paymentMethods: [],
-    taxDeductible: null,
+// Advanced filter state
+const [filters, setFilters] = useState<FilterState>({
+  types: ['work', 'time', 'expense', 'income', 'invoice', 'meeting', 'travel', 'note', 'tax'],
+  categories: [],
+  clients: [],
+  paymentMethods: [],
+  taxDeductible: null,
   })
   const [isFilterOpen, setIsFilterOpen] = useState(false)
 
   // Quick add popover for date click
   const [quickAddDate, setQuickAddDate] = useState<Date | null>(null)
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
+  
+  // Daily entries panel state
+  const [isDailyEntriesOpen, setIsDailyEntriesOpen] = useState(false)
+  const [dailyEntriesDate, setDailyEntriesDate] = useState<Date | null>(null)
+  const [showAddEntryOptions, setShowAddEntryOptions] = useState(false)
 
   // Inline edit state
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null)
@@ -427,21 +391,24 @@ export default function CalendarPage() {
   const [expenseFormDefaultDate, setExpenseFormDefaultDate] = useState<Date | null>(null)
   const [selectedExpenseForEdit, setSelectedExpenseForEdit] = useState<Expense | null>(null)
 
-  const [newEntry, setNewEntry] = useState({
-    type: 'work',
-    title: '',
-    client: '',
-    amount: '',
-    hours: '',
-    kilometers: '',
-    category: '',
-    notes: '',
-    repeat: false,
-    paymentMethod: '',
-    taxDeductible: false,
+const [newEntry, setNewEntry] = useState({
+  type: 'work',
+  title: '',
+  client: '',
+  amount: '',
+  hours: '',
+  kilometers: '',
+  category: '',
+  notes: '',
+  repeat: false,
+  paymentMethod: 'Credit Card',
+  taxDeductible: false,
+  startTime: '',
+  endTime: '',
+  vendor: '',
   })
 
-  const [activeFilters, setActiveFilters] = useState(['work', 'expense', 'income', 'invoice', 'meeting', 'travel', 'tax'])
+  const [activeFilters, setActiveFilters] = useState(['work', 'time', 'expense', 'income', 'invoice', 'meeting', 'travel', 'note', 'tax'])
   
   // Mobile/responsive state
   const [isMobile, setIsMobile] = useState(false)
@@ -747,83 +714,147 @@ if (event.type === 'expense' && event.amount) {
     }))
   }
 
-  const resetFilters = () => {
-    setFilters({
-      types: ['work', 'expense', 'income', 'invoice', 'meeting', 'travel', 'tax'],
-      categories: [],
-      clients: [],
-      paymentMethods: [],
-      taxDeductible: null,
-    })
+const resetFilters = () => {
+  setFilters({
+  types: ['work', 'time', 'expense', 'income', 'invoice', 'meeting', 'travel', 'note', 'tax'],
+  categories: [],
+  clients: [],
+  paymentMethods: [],
+  taxDeductible: null,
+  })
   }
 
-  const activeFilterCount = 
-    (filters.types.length < 7 ? 1 : 0) +
-    (filters.categories.length > 0 ? 1 : 0) +
-    (filters.clients.length > 0 ? 1 : 0) +
-    (filters.paymentMethods.length > 0 ? 1 : 0) +
-    (filters.taxDeductible !== null ? 1 : 0)
+const activeFilterCount =
+  (filters.types.length < 9 ? 1 : 0) +
+  (filters.categories.length > 0 ? 1 : 0) +
+  (filters.clients.length > 0 ? 1 : 0) +
+  (filters.paymentMethods.length > 0 ? 1 : 0) +
+  (filters.taxDeductible !== null ? 1 : 0)
 
 const handleAddEntry = async () => {
-    if (newEntry.title) {
-      const eventDate = selectedDate ? formatDateToLocal(selectedDate) : formatDateToLocal(new Date())
+  // For note type, title can be optional if notes are provided
+  const hasContent = newEntry.title || (newEntry.type === 'note' && newEntry.notes)
+  
+  if (hasContent) {
+    const eventDate = selectedDate ? formatDateToLocal(selectedDate) : formatDateToLocal(new Date())
+    
+    // Handle expense type - use the expenses API
+    if (newEntry.type === 'expense') {
+      const expensePayload = {
+        date: eventDate,
+        description: newEntry.title || 'Expense',
+        category: newEntry.category || 'other',
+        amount: newEntry.amount ? parseFloat(newEntry.amount) : 0,
+        paymentMethod: newEntry.paymentMethod || 'Credit Card',
+        source: 'calendar' as const,
+      }
       
-      // If type is 'travel', use the expenses API
-      if (newEntry.type === 'travel') {
-        // Get human-readable payment method
-        const paymentMethodMap: Record<string, string> = {
-          credit: 'Credit Card',
-          debit: 'Debit Card',
-          bank: 'Bank Transfer',
-          cash: 'Cash',
-          paypal: 'PayPal',
-        }
-        
-        const expensePayload = {
-          date: eventDate,
-          description: newEntry.title,
-          category: 'travel',
-          amount: newEntry.amount ? parseFloat(newEntry.amount) : 0,
-          paymentMethod: paymentMethodMap[newEntry.paymentMethod] || 'Credit Card',
-          source: 'calendar' as const,
-        }
-        
-        try {
-          await createExpenseAPI(expensePayload)
-          // Revalidate expenses cache
-          mutate(`expenses-${viewStartDate}-${viewEndDate}`)
-          mutate('expenses')
-          toast({
-            title: 'Travel expense added',
-            description: `Added travel expense for $${expensePayload.amount.toFixed(2)}`,
-          })
-        } catch (error) {
-          toast({
-            title: 'Error',
-            description: 'Failed to add travel expense',
-            variant: 'destructive',
-          })
-        }
-      } else {
-        // Other entry types (work, meeting, etc.) are stored as local events
-        const newEvent: CalendarEvent = {
-          id: `local-${Date.now()}`,
-          title: newEntry.title,
-          date: eventDate,
-          type: newEntry.type,
-          amount: newEntry.amount ? parseFloat(newEntry.amount) : undefined,
-          hours: newEntry.hours ? parseFloat(newEntry.hours) : undefined,
-          client: newEntry.client || undefined,
-          category: newEntry.category || undefined,
-          kilometers: newEntry.kilometers ? parseFloat(newEntry.kilometers) : undefined,
-          paymentMethod: newEntry.paymentMethod || undefined,
-          taxDeductible: newEntry.taxDeductible,
-        }
-        setLocalEvents((prev) => [...prev, newEvent])
+      try {
+        await createExpenseAPI(expensePayload)
+        // Revalidate expenses cache
+        mutate(`expenses-${viewStartDate}-${viewEndDate}`)
+        mutate('expenses')
+        toast({
+          title: 'Expense added',
+          description: `Added expense for $${expensePayload.amount.toFixed(2)}`,
+        })
+      } catch (error) {
+        toast({
+          title: 'Error',
+          description: 'Failed to add expense',
+          variant: 'destructive',
+        })
       }
     }
-    setIsAddEventOpen(false)
-    resetNewEntry()
+    // Handle travel type - use the expenses API with travel category
+    else if (newEntry.type === 'travel') {
+      const kmRate = 0.58 // Default rate per km
+      const distance = newEntry.kilometers ? parseFloat(newEntry.kilometers) : 0
+      const calculatedAmount = newEntry.amount ? parseFloat(newEntry.amount) : distance * kmRate
+      
+      const expensePayload = {
+        date: eventDate,
+        description: newEntry.title || 'Travel',
+        category: 'travel',
+        amount: calculatedAmount,
+        paymentMethod: newEntry.paymentMethod || 'Credit Card',
+        source: 'calendar' as const,
+      }
+      
+      try {
+        await createExpenseAPI(expensePayload)
+        // Revalidate expenses cache
+        mutate(`expenses-${viewStartDate}-${viewEndDate}`)
+        mutate('expenses')
+        toast({
+          title: 'Travel expense added',
+          description: `Added travel expense for $${expensePayload.amount.toFixed(2)}`,
+        })
+      } catch (error) {
+        toast({
+          title: 'Error',
+          description: 'Failed to add travel expense',
+          variant: 'destructive',
+        })
+      }
+    }
+    // Handle income type as local-only (no Income API)
+    else if (newEntry.type === 'income') {
+      const newEvent: CalendarEvent = {
+        id: `local-${Date.now()}`,
+        title: newEntry.title || 'Income',
+        date: eventDate,
+        type: 'income',
+        amount: newEntry.amount ? parseFloat(newEntry.amount) : undefined,
+        client: newEntry.client || undefined,
+      }
+      setLocalEvents((prev) => [...prev, newEvent])
+      toast({
+        title: 'Income entry added',
+        description: `Added to calendar (local only)`,
+      })
+    }
+    // Handle other entry types (work, time, meeting, note) as local events
+    else {
+      const newEvent: CalendarEvent = {
+        id: `local-${Date.now()}`,
+        title: newEntry.title || (newEntry.type === 'note' ? 'Note' : ''),
+        date: eventDate,
+        type: newEntry.type,
+        amount: newEntry.amount ? parseFloat(newEntry.amount) : undefined,
+        hours: newEntry.hours ? parseFloat(newEntry.hours) : undefined,
+        client: newEntry.client || undefined,
+        category: newEntry.category || undefined,
+        kilometers: newEntry.kilometers ? parseFloat(newEntry.kilometers) : undefined,
+        paymentMethod: newEntry.paymentMethod || undefined,
+        taxDeductible: newEntry.taxDeductible,
+        notes: newEntry.notes || undefined,
+      }
+      setLocalEvents((prev) => [...prev, newEvent])
+
+      // Also persist "work" entries to the shared data store for invoice linking
+      if (newEntry.type === 'work') {
+        const hours = newEntry.hours ? parseFloat(newEntry.hours) : 0
+        const rate = newEntry.amount ? parseFloat(newEntry.amount) : 0
+        addWorkDoneEntry({
+          date: eventDate,
+          contact: newEntry.client || '',
+          description: newEntry.title || 'Work Done',
+          hours,
+          rate,
+          amount: hours * rate,
+          invoiceId: null,
+        })
+      }
+
+      toast({
+        title: 'Entry added',
+        description: `Added ${newEntry.type} entry to calendar`,
+      })
+    }
+  }
+  setIsAddEventOpen(false)
+  resetNewEntry()
   }
 
   const resetNewEntry = () => {
@@ -837,8 +868,11 @@ const handleAddEntry = async () => {
       category: '',
       notes: '',
       repeat: false,
-      paymentMethod: '',
+      paymentMethod: 'Credit Card',
       taxDeductible: false,
+      startTime: '',
+      endTime: '',
+      vendor: '',
     })
   }
 
@@ -859,8 +893,25 @@ const handleAddEntry = async () => {
 
   const handleDateClick = (date: Date) => {
     setSelectedDate(date)
-    setQuickAddDate(date)
-    setIsQuickAddOpen(true)
+    setDailyEntriesDate(date)
+    setShowAddEntryOptions(false)
+    setIsDailyEntriesOpen(true)
+  }
+  
+  const handleAddNewFromDailyPanel = (type: string) => {
+    if (dailyEntriesDate) {
+      setIsDailyEntriesOpen(false)
+      setShowAddEntryOptions(false)
+      
+      // For expense type, open the reusable ExpenseForm
+      if (type === 'expense') {
+        handleOpenExpenseForm(dailyEntriesDate)
+      } else {
+        setNewEntry({ ...newEntry, type })
+        setSelectedDate(dailyEntriesDate)
+        setIsAddEventOpen(true)
+      }
+    }
   }
 
   const handleEditEvent = (event: CalendarEvent) => {
@@ -1093,12 +1144,12 @@ const handleAddEntry = async () => {
               <ChevronLeft className="h-4 w-4" />
             </Button>
             {viewMode === 'month' ? (
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1">
                 <Select
                   value={month.toString()}
                   onValueChange={(value) => setCurrentDate(new Date(year, parseInt(value), 1))}
                 >
-                  <SelectTrigger className="h-8 w-[100px] border-0 bg-transparent text-sm font-semibold md:w-[120px] md:text-lg">
+                  <SelectTrigger className="h-8 w-auto min-w-[90px] border-0 bg-transparent text-sm font-semibold md:min-w-[110px] md:text-lg">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1111,7 +1162,7 @@ const handleAddEntry = async () => {
                   value={year.toString()}
                   onValueChange={(value) => setCurrentDate(new Date(parseInt(value), month, 1))}
                 >
-                  <SelectTrigger className="h-8 w-[70px] border-0 bg-transparent text-sm font-semibold md:w-[80px] md:text-lg">
+                  <SelectTrigger className="h-8 w-auto min-w-[60px] border-0 bg-transparent text-sm font-semibold md:min-w-[70px] md:text-lg">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1369,7 +1420,7 @@ onClick={() => {
 
                   {/* Clients */}
                   <div>
-                    <h5 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Client</h5>
+                    <h5 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact</h5>
                     <div className="space-y-1">
                       {CLIENTS.map((client) => (
                         <button
@@ -1450,79 +1501,128 @@ onClick={() => {
               </ScrollArea>
             </PopoverContent>
           </Popover>
-          <Dialog open={isAddEventOpen} onOpenChange={setIsAddEventOpen}>
-            <DialogTrigger asChild>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button size="sm" className="h-8">
                 <Plus className="h-4 w-4" />
                 <span className="ml-2 hidden sm:inline">Add Entry</span>
               </Button>
-            </DialogTrigger>
-            <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-[500px]">
-              <DialogHeader className="shrink-0">
-                <DialogTitle>Add New Entry</DialogTitle>
-                <DialogDescription>
-                  Add work done, expenses, or travels to your calendar
-                </DialogDescription>
-              </DialogHeader>
-
-              <ScrollArea className="flex-1 overflow-y-auto pr-4">
-              {/* Entry Type Tabs */}
-              <Tabs value={newEntry.type} onValueChange={(v) => setNewEntry({ ...newEntry, type: v })}>
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="work" className="gap-1 text-xs">
-                    <Clock className="h-3 w-3" />
-                    Work
-                  </TabsTrigger>
-                  <TabsTrigger value="expense" className="gap-1 text-xs">
-                    <Receipt className="h-3 w-3" />
-                    Expense
-                  </TabsTrigger>
-                  <TabsTrigger value="travel" className="gap-1 text-xs">
-                    <Car className="h-3 w-3" />
-                    Travel
-                  </TabsTrigger>
-                </TabsList>
-                <TabsList className="mt-2 grid w-full grid-cols-3">
-                  <TabsTrigger value="invoice" className="gap-1 text-xs">
-                    <FileText className="h-3 w-3" />
-                    Invoice
-                  </TabsTrigger>
-                  <TabsTrigger value="income" className="gap-1 text-xs">
-                    <TrendingUp className="h-3 w-3" />
-                    Income
-                  </TabsTrigger>
-                  <TabsTrigger value="meeting" className="gap-1 text-xs">
-                    <Users className="h-3 w-3" />
-                    Meeting
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-
-              <div className="grid gap-4 py-4">
-                {/* Date */}
-                <div className="space-y-2">
-                  <Label>Date</Label>
-                  <Input
-                    type="date"
-                    value={selectedDate ? formatDateToLocal(selectedDate) : formatDateToLocal(new Date())}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        const [year, month, day] = e.target.value.split('-').map(Number)
-                        setSelectedDate(new Date(year, month - 1, day))
-                      }
-                    }}
-                  />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">New entry in</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => {
+                setNewEntry({ ...newEntry, type: 'work' })
+                setIsAddEventOpen(true)
+              }}>
+                <Briefcase className="mr-2 h-4 w-4" />
+                Work done
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setNewEntry({ ...newEntry, type: 'time' })
+                setIsAddEventOpen(true)
+              }}>
+                <Clock className="mr-2 h-4 w-4" />
+                Time
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setNewEntry({ ...newEntry, type: 'expense' })
+                setIsAddEventOpen(true)
+              }}>
+                <Receipt className="mr-2 h-4 w-4" />
+                Expenses
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setNewEntry({ ...newEntry, type: 'travel' })
+                setIsAddEventOpen(true)
+              }}>
+                <Car className="mr-2 h-4 w-4" />
+                Travels
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setNewEntry({ ...newEntry, type: 'note' })
+                setIsAddEventOpen(true)
+              }}>
+                <FileText className="mr-2 h-4 w-4" />
+                Note
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          
+          {/* Add New Entry Sheet - Momenteo Style */}
+          <Sheet open={isAddEventOpen} onOpenChange={setIsAddEventOpen}>
+            <SheetContent className="flex h-full max-h-screen w-full flex-col overflow-hidden p-0 sm:max-w-md">
+              <SheetHeader className="shrink-0 border-b border-border px-4 py-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <SheetTitle className="text-base whitespace-nowrap">New entry in</SheetTitle>
+                    <Select value={newEntry.type} onValueChange={(v) => setNewEntry({ ...newEntry, type: v })}>
+                      <SelectTrigger className="h-8 w-[130px] text-sm font-medium">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="work">
+                          <span className="flex items-center gap-2">
+                            <Briefcase className="h-3.5 w-3.5" />
+                            Work done
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="time">
+                          <span className="flex items-center gap-2">
+                            <Clock className="h-3.5 w-3.5" />
+                            Time
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="expense">
+                          <span className="flex items-center gap-2">
+                            <Receipt className="h-3.5 w-3.5" />
+                            Expenses
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="travel">
+                          <span className="flex items-center gap-2">
+                            <Car className="h-3.5 w-3.5" />
+                            Travels
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="note">
+                          <span className="flex items-center gap-2">
+                            <FileText className="h-3.5 w-3.5" />
+                            Note
+                          </span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <span>for</span>
+                    <DatePicker
+                      date={selectedDate || new Date()}
+                      onDateChange={(date) => {
+                        if (date) setSelectedDate(date)
+                      }}
+                      placeholder="Select date"
+                      className="h-8"
+                    />
+                  </div>
                 </div>
+                <SheetDescription className="sr-only">
+                  Add a new calendar entry
+                </SheetDescription>
+              </SheetHeader>
+
+              <ScrollArea className="flex-1 overflow-y-auto">
+                <div className="grid gap-4 p-4">
 
                   {/* Work Done Fields */}
                   {newEntry.type === 'work' && (
                     <>
                       <div className="space-y-2">
-                        <Label>Client</Label>
+                        <Label>Contact</Label>
                         {isAddingClient ? (
                           <div className="flex gap-2">
                             <Input
-                              placeholder="Enter client name"
+                              placeholder="Enter contact name"
                               value={newClientName}
                               onChange={(e) => setNewClientName(e.target.value)}
                               autoFocus
@@ -1567,10 +1667,10 @@ onClick={() => {
                             }
                           }}>
                             <SelectTrigger>
-                              <SelectValue placeholder="Select a client" />
+                              <SelectValue placeholder="Select a contact" />
                             </SelectTrigger>
                             <SelectContent>
-                              {contacts.map((contact) => (
+                              {sortAlphabetically(contacts).map((contact) => (
                                 <SelectItem key={contact.id} value={contact.name}>
                                   {contact.name}
                                 </SelectItem>
@@ -1578,7 +1678,7 @@ onClick={() => {
                               <SelectItem value="__add_new__" className="text-primary">
                                 <span className="flex items-center gap-2">
                                   <Plus className="h-3 w-3" />
-                                  Add new client
+                                  Add new contact
                                 </span>
                               </SelectItem>
                             </SelectContent>
@@ -1617,24 +1717,186 @@ onClick={() => {
                   </>
                 )}
 
-                {/* Expense Fields - Redirect to full ExpenseForm */}
+                {/* Time Fields */}
+                {newEntry.type === 'time' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Contact</Label>
+                      {isAddingClient ? (
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Enter contact name"
+                            value={newClientName}
+                            onChange={(e) => setNewClientName(e.target.value)}
+                            autoFocus
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              if (newClientName.trim()) {
+                                addContact({
+                                  name: newClientName.trim(),
+                                  email: '',
+                                  phone: '',
+                                  address: '',
+                                })
+                                setNewEntry({ ...newEntry, client: newClientName.trim() })
+                                setNewClientName('')
+                                setIsAddingClient(false)
+                              }
+                            }}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setIsAddingClient(false)
+                              setNewClientName('')
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Select value={newEntry.client} onValueChange={(v) => {
+                          if (v === '__add_new__') {
+                            setIsAddingClient(true)
+                          } else {
+                            setNewEntry({ ...newEntry, client: v })
+                          }
+                        }}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a contact" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {sortAlphabetically(contacts).map((contact) => (
+                              <SelectItem key={contact.id} value={contact.name}>
+                                {contact.name}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value="__add_new__" className="text-primary">
+                              <span className="flex items-center gap-2">
+                                <Plus className="h-3 w-3" />
+                                Add new contact
+                              </span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <Input
+                        placeholder="What did you work on?"
+                        value={newEntry.title}
+                        onChange={(e) => setNewEntry({ ...newEntry, title: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Start Time</Label>
+                        <Input
+                          type="time"
+                          value={newEntry.startTime || ''}
+                          onChange={(e) => setNewEntry({ ...newEntry, startTime: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>End Time</Label>
+                        <Input
+                          type="time"
+                          value={newEntry.endTime || ''}
+                          onChange={(e) => setNewEntry({ ...newEntry, endTime: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Hours (calculated)</Label>
+                      <Input
+                        type="number"
+                        step="0.25"
+                        placeholder="0"
+                        value={newEntry.hours}
+                        onChange={(e) => setNewEntry({ ...newEntry, hours: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Expense Fields - Inline Form */}
                 {newEntry.type === 'expense' && (
-                  <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <Receipt className="mb-4 h-12 w-12 text-muted-foreground" />
-                    <p className="mb-2 text-sm font-medium">Full Expense Form</p>
-                    <p className="mb-4 text-xs text-muted-foreground">
-                      Use our detailed expense form with categories, vendors, taxes, and receipts.
-                    </p>
-                    <Button
-                      onClick={() => {
-                        setIsAddEventOpen(false)
-                        handleOpenExpenseForm(selectedDate || new Date())
-                      }}
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Open Expense Form
-                    </Button>
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <Input
+                        placeholder="What was the expense for?"
+                        value={newEntry.title}
+                        onChange={(e) => setNewEntry({ ...newEntry, title: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Amount ($)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={newEntry.amount}
+                        onChange={(e) => setNewEntry({ ...newEntry, amount: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Category</Label>
+                      <Select 
+                        value={newEntry.category || ''} 
+                        onValueChange={(v) => setNewEntry({ ...newEntry, category: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="office">Office Supplies</SelectItem>
+                          <SelectItem value="software">Software & Subscriptions</SelectItem>
+                          <SelectItem value="travel">Travel</SelectItem>
+                          <SelectItem value="meals">Meals & Entertainment</SelectItem>
+                          <SelectItem value="utilities">Utilities</SelectItem>
+                          <SelectItem value="professional">Professional Services</SelectItem>
+                          <SelectItem value="marketing">Marketing</SelectItem>
+                          <SelectItem value="equipment">Equipment</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Vendor (optional)</Label>
+                      <Input
+                        placeholder="Where did you make this purchase?"
+                        value={newEntry.vendor || ''}
+                        onChange={(e) => setNewEntry({ ...newEntry, vendor: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Payment Method</Label>
+                      <Select 
+                        value={newEntry.paymentMethod || 'Credit Card'} 
+                        onValueChange={(v) => setNewEntry({ ...newEntry, paymentMethod: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Credit Card">Credit Card</SelectItem>
+                          <SelectItem value="Debit Card">Debit Card</SelectItem>
+                          <SelectItem value="Cash">Cash</SelectItem>
+                          <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                          <SelectItem value="PayPal">PayPal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
                 )}
 
                   {/* Travel Fields */}
@@ -1664,7 +1926,7 @@ onClick={() => {
                       </div>
                     </div>
                       <div className="space-y-2">
-                        <Label>Client</Label>
+                        <Label>Contact</Label>
                         <Select value={newEntry.client} onValueChange={(v) => {
                           if (v === '__add_new__') {
                             setIsAddingClient(true)
@@ -1677,7 +1939,7 @@ onClick={() => {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="expense">Track as expense</SelectItem>
-                            {contacts.map((contact) => (
+                            {sortAlphabetically(contacts).map((contact) => (
                               <SelectItem key={contact.id} value={contact.name}>
                                 {contact.name}
                               </SelectItem>
@@ -1685,7 +1947,7 @@ onClick={() => {
                             <SelectItem value="__add_new__" className="text-primary">
                               <span className="flex items-center gap-2">
                                 <Plus className="h-3 w-3" />
-                                Add new client
+                                Add new contact
                               </span>
                             </SelectItem>
                           </SelectContent>
@@ -1706,7 +1968,7 @@ onClick={() => {
                       />
                     </div>
                     <div className="space-y-2">
-                        <Label>Client</Label>
+                        <Label>Contact</Label>
                         <Select
                           value={newEntry.client}
                           onValueChange={(v) => {
@@ -1718,10 +1980,10 @@ onClick={() => {
                           }}
                         >
                           <SelectTrigger>
-                            <SelectValue placeholder="Select a client" />
+                            <SelectValue placeholder="Select a contact" />
                           </SelectTrigger>
                           <SelectContent>
-                            {contacts.map((contact) => (
+                            {sortAlphabetically(contacts).map((contact) => (
                               <SelectItem key={contact.id} value={contact.name}>
                                 {contact.name}
                               </SelectItem>
@@ -1729,7 +1991,7 @@ onClick={() => {
                             <SelectItem value="__add_new__" className="text-primary">
                               <span className="flex items-center gap-2">
                                 <Plus className="h-3 w-3" />
-                                Add new client
+                                Add new contact
                               </span>
                             </SelectItem>
                           </SelectContent>
@@ -1750,11 +2012,11 @@ onClick={() => {
                 {newEntry.type === 'invoice' && (
                   <>
                     <div className="space-y-2">
-                      <Label>Client</Label>
+                      <Label>Contact</Label>
                       {isAddingClient ? (
                         <div className="flex gap-2">
                           <Input
-                            placeholder="Enter client name"
+                            placeholder="Enter contact name"
                             value={newClientName}
                             onChange={(e) => setNewClientName(e.target.value)}
                             autoFocus
@@ -1794,10 +2056,10 @@ onClick={() => {
                           }
                         }}>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select a client" />
+                            <SelectValue placeholder="Select a contact" />
                           </SelectTrigger>
                           <SelectContent>
-                            {contacts.map((contact) => (
+                            {sortAlphabetically(contacts).map((contact) => (
                               <SelectItem key={contact.id} value={contact.name}>
                                 {contact.name}
                               </SelectItem>
@@ -1805,7 +2067,7 @@ onClick={() => {
                             <SelectItem value="__add_new__" className="text-primary">
                               <span className="flex items-center gap-2">
                                 <Plus className="h-3 w-3" />
-                                Add new client
+                                Add new contact
                               </span>
                             </SelectItem>
                           </SelectContent>
@@ -1866,11 +2128,11 @@ onClick={() => {
                           }
                         }}>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select a client (optional)" />
+                            <SelectValue placeholder="Select a contact (optional)" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">No client</SelectItem>
-                          {contacts.map((contact) => (
+                          {sortAlphabetically(contacts).map((contact) => (
                             <SelectItem key={contact.id} value={contact.name}>
                               {contact.name}
                             </SelectItem>
@@ -1878,7 +2140,7 @@ onClick={() => {
                           <SelectItem value="__add_new__" className="text-primary">
                             <span className="flex items-center gap-2">
                               <Plus className="h-3 w-3" />
-                              Add new client
+                              Add new contact
                             </span>
                           </SelectItem>
                         </SelectContent>
@@ -1887,31 +2149,88 @@ onClick={() => {
                   </>
                 )}
 
-                {/* Repeat Option */}
-                <div className="flex items-center justify-between rounded-lg border border-border p-3">
-                  <div className="flex items-center gap-2">
-                    <Repeat className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-sm font-medium">Repeat this entry</p>
-                      <p className="text-xs text-muted-foreground">Create recurring entries</p>
+                {/* Note Fields */}
+                {newEntry.type === 'note' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Note Title</Label>
+                      <Input
+                        placeholder="Enter a title for your note"
+                        value={newEntry.title}
+                        onChange={(e) => setNewEntry({ ...newEntry, title: e.target.value })}
+                      />
                     </div>
+                    <div className="space-y-2">
+                      <Label>Note Content</Label>
+                      <Textarea
+                        placeholder="Write your note here..."
+                        rows={4}
+                        value={newEntry.notes}
+                        onChange={(e) => setNewEntry({ ...newEntry, notes: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Client (optional)</Label>
+                      <Select value={newEntry.client || 'none'} onValueChange={(v) => {
+                        if (v === '__add_new__') {
+                          setIsAddingClient(true)
+                        } else if (v === 'none') {
+                          setNewEntry({ ...newEntry, client: '' })
+                        } else {
+                          setNewEntry({ ...newEntry, client: v })
+                        }
+                      }}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Link to a client (optional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No client</SelectItem>
+                          {sortAlphabetically(contacts).map((contact) => (
+                            <SelectItem key={contact.id} value={contact.name}>
+                              {contact.name}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="__add_new__" className="text-primary">
+                            <span className="flex items-center gap-2">
+                              <Plus className="h-3 w-3" />
+                              Add new contact
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+
+                {/* Repeat Option - Only show for certain entry types */}
+                {['work', 'time', 'expense', 'travel'].includes(newEntry.type) && (
+                  <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <Repeat className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-sm font-medium">Repeat this entry</p>
+                        <p className="text-xs text-muted-foreground">Create recurring entries</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={newEntry.repeat}
+                      onCheckedChange={(checked) => setNewEntry({ ...newEntry, repeat: checked })}
+                    />
                   </div>
-                  <Switch
-                    checked={newEntry.repeat}
-                    onCheckedChange={(checked) => setNewEntry({ ...newEntry, repeat: checked })}
-                  />
-                </div>
+                )}
               </div>
 
               </ScrollArea>
-              <DialogFooter className="shrink-0 border-t border-border pt-4">
-                <Button variant="outline" className="bg-transparent" onClick={() => setIsAddEventOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleAddEntry}>Add Entry</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              <div className="shrink-0 border-t border-border px-4 py-4">
+                <div className="flex gap-2">
+                  <Button variant="outline" className="flex-1 bg-transparent" onClick={() => setIsAddEventOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button className="flex-1" onClick={handleAddEntry}>Add Entry</Button>
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
 
@@ -1995,14 +2314,19 @@ onClick={() => {
               <div className="flex h-full flex-col">
                 {/* Day Headers */}
                 <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">
-                  {DAYS.map((day) => (
-                    <div
-                      key={day}
-                      className="border-r border-border p-2 text-center text-xs font-medium text-muted-foreground last:border-r-0"
-                    >
-                      {day}
-                    </div>
-                  ))}
+                  {DAYS.map((day, index) => {
+                    const isWeekend = index === 0 || index === 6
+                    return (
+                      <div
+                        key={day}
+                        className={`border-r border-border p-2 text-center text-xs font-medium last:border-r-0 text-muted-foreground ${
+                          isWeekend ? 'bg-foreground/[0.04]' : ''
+                        }`}
+                      >
+                        {day}
+                      </div>
+                    )
+                  })}
                 </div>
 
                 {/* Calendar Grid - Expanded */}
@@ -2010,121 +2334,64 @@ onClick={() => {
                   {calendarDays.map((day, index) => {
                     const events = getEventsForDate(day.date)
                     const isSelected = selectedDate?.toDateString() === day.date.toDateString()
-                    const isQuickAddTarget = quickAddDate?.toDateString() === day.date.toDateString()
+                    const isWeekend = day.date.getDay() === 0 || day.date.getDay() === 6
 
                     return (
-                      <Popover
+                      <div
                         key={index}
-                        open={isQuickAddOpen && isQuickAddTarget}
-                        onOpenChange={(open) => {
-                          if (!open) setIsQuickAddOpen(false)
-                        }}
+                        onClick={() => handleDateClick(day.date)}
+                        className={`
+                          group relative flex cursor-pointer flex-col border-b border-r border-border p-1.5 text-left transition-colors last:border-r-0 hover:bg-accent/30
+                          ${!day.isCurrentMonth ? (isWeekend ? 'bg-muted/50' : 'bg-muted/40') : isWeekend ? 'bg-foreground/[0.04]' : 'bg-card'}
+                          ${isWeekend ? 'border-r-border/60' : ''}
+                          ${isSelected ? 'ring-2 ring-inset ring-primary' : ''}
+                        `}
                       >
-                        <PopoverTrigger asChild>
+                        {/* Hover "+" icon - opens sidebar */}
+                        <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity group-hover:opacity-100">
                           <button
                             type="button"
-                            onClick={() => handleDateClick(day.date)}
-                            className={`
-                              relative flex flex-col border-b border-r border-border p-1.5 text-left transition-colors last:border-r-0 hover:bg-accent/30
-                              ${!day.isCurrentMonth ? 'bg-muted/20' : 'bg-card'}
-                              ${isSelected ? 'ring-2 ring-inset ring-primary' : ''}
-                            `}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDateClick(day.date)
+                              setShowAddEntryOptions(true)
+                            }}
+                            className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
                           >
-                            <span
-                              className={`
-                                inline-flex h-7 w-7 items-center justify-center rounded-full text-sm
-                                ${isToday(day.date) ? 'bg-primary font-semibold text-primary-foreground' : ''}
-                                ${!day.isCurrentMonth ? 'text-muted-foreground/50' : 'text-foreground'}
-                              `}
-                            >
-                              {day.date.getDate()}
-                            </span>
-                            <div className="mt-1 flex-1 space-y-0.5 overflow-hidden">
-                              {events.slice(0, 4).map((event) => {
-                                const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
-                                return (
-                                  <button
-                                    key={event.id}
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      handleEditEvent(event)
-                                    }}
-                                    className={`w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] leading-tight transition-opacity hover:opacity-80 ${config.color}`}
-                                  >
-                                    {event.amount ? `$${event.amount}` : ''} {event.title}
-                                  </button>
-                                )
-                              })}
-                              {events.length > 4 && (
-                                <div className="px-1 text-[10px] text-muted-foreground">+{events.length - 4} more</div>
-                              )}
-                            </div>
+                            <Plus className="h-3 w-3" />
                           </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-64 p-0" align="start">
-                          <div className="border-b border-border px-4 py-3">
-                            <p className="text-sm font-medium">
-                              {day.date.toLocaleDateString('en-US', {
-                                weekday: 'short',
-                                month: 'short',
-                                day: 'numeric',
-                              })}
-                            </p>
-                            <p className="text-xs text-muted-foreground">Add new entry</p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 p-3">
-                            {[
-                              { type: 'income', icon: DollarSign, label: 'Income' },
-                              { type: 'expense', icon: Receipt, label: 'Expense' },
-                              { type: 'invoice', icon: FileCheck, label: 'Invoice' },
-                              { type: 'work', icon: Clock, label: 'Work Log' },
-                            ].map((item) => {
-                              const config = eventTypeConfig[item.type as keyof typeof eventTypeConfig]
-                              return (
-                                <Button
-                                  key={item.type}
-                                  variant="outline"
-                                  className="h-auto flex-col gap-1.5 bg-transparent py-3"
-                                  onClick={() => handleQuickAdd(item.type)}
-                                >
-                                  <div className={`rounded-md p-1.5 ${config.color}`}>
-                                    <item.icon className="h-4 w-4" />
-                                  </div>
-                                  <span className="text-xs">{item.label}</span>
-                                </Button>
-                              )
-                            })}
-                          </div>
-                          {events.length > 0 && (
-                            <div className="border-t border-border px-3 py-2">
-                              <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                                {events.length} existing {events.length === 1 ? 'entry' : 'entries'}
-                              </p>
-                              <div className="space-y-1">
-                                {events.slice(0, 3).map((event) => {
-                                  const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
-                                  return (
-                                    <button
-                                      key={event.id}
-                                      type="button"
-                                      onClick={() => {
-                                        setIsQuickAddOpen(false)
-                                        handleEditEvent(event)
-                                      }}
-                                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-accent/50"
-                                    >
-                                      <div className={`h-2 w-2 rounded-full ${config.dotColor}`} />
-                                      <span className="flex-1 truncate text-xs">{event.title}</span>
-                                      <Pencil className="h-3 w-3 text-muted-foreground" />
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            </div>
+                        </div>
+                        <span
+                          className={`
+                            inline-flex h-7 w-7 items-center justify-center rounded-full text-sm
+                            ${isToday(day.date) ? 'bg-primary font-semibold text-primary-foreground' : ''}
+                            ${!day.isCurrentMonth ? 'text-muted-foreground/40' : 'text-foreground'}
+                          `}
+                        >
+                          {day.date.getDate()}
+                        </span>
+                        <div className="mt-1 flex-1 space-y-0.5 overflow-hidden">
+                          {events.slice(0, 4).map((event) => {
+                            const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
+                            return (
+                              <button
+                                key={event.id}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleEditEvent(event)
+                                }}
+                                className={`w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] leading-tight transition-opacity hover:opacity-80 ${config.color}`}
+                              >
+                                {event.amount ? `$${event.amount}` : ''} {event.title}
+                              </button>
+                            )
+                          })}
+                          {events.length > 4 && (
+                            <div className="px-1 text-[10px] text-muted-foreground">+{events.length - 4} more</div>
                           )}
-                        </PopoverContent>
-                      </Popover>
+                        </div>
+                      </div>
                     )
                   })}
                 </div>
@@ -2133,60 +2400,78 @@ onClick={() => {
               /* Week View - Expanded */
               <div className="flex h-full flex-col">
                 <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">
-                  {weekDays.map((day, index) => (
-                    <div
-                      key={index}
-                      className={`border-r border-border p-3 text-center last:border-r-0 ${
-                        isToday(day) ? 'bg-primary/10' : ''
-                      }`}
-                    >
-                      <div className="text-xs text-muted-foreground">{DAYS[day.getDay()]}</div>
-                      <div className={`text-xl font-semibold ${isToday(day) ? 'text-primary' : 'text-foreground'}`}>
-                        {day.getDate()}
+                  {weekDays.map((day, index) => {
+                    const isWeekend = day.getDay() === 0 || day.getDay() === 6
+                    return (
+                      <div
+                        key={index}
+                        className={`border-r border-border p-3 text-center last:border-r-0 ${
+                          isToday(day) ? 'bg-primary/10' : isWeekend ? 'bg-foreground/[0.04]' : ''
+                        } ${isWeekend ? 'border-r-border/60' : ''}`}
+                      >
+                        <div className="text-xs text-muted-foreground">{DAYS[day.getDay()]}</div>
+                        <div className={`text-xl font-semibold ${isToday(day) ? 'text-primary' : 'text-foreground'}`}>
+                          {day.getDate()}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
                 <div className="grid flex-1 grid-cols-7">
                   {weekDays.map((day, index) => {
                     const events = getEventsForDate(day)
                     const isSelected = selectedDate?.toDateString() === day.toDateString()
+                    const isWeekend = day.getDay() === 0 || day.getDay() === 6
 
                     return (
-                      <button
+                      <div
                         key={index}
-                        type="button"
-                        onClick={() => setSelectedDate(day)}
+                        onClick={() => handleDateClick(day)}
                         className={`
-                          flex flex-col border-r border-border p-2 text-left last:border-r-0 hover:bg-accent/30
-                          ${isSelected ? 'bg-accent/50' : ''}
+                          group relative flex cursor-pointer flex-col border-r border-border p-2 text-left last:border-r-0 hover:bg-accent/30
+                          ${isWeekend ? 'border-r-border/60' : ''}
+                          ${isSelected ? 'bg-accent/50' : isWeekend ? 'bg-foreground/[0.04]' : ''}
                         `}
                       >
-                <div className="flex-1 space-y-1.5">
-                  {events.map((event) => {
-                    const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
-                    const Icon = config.icon
-                    return (
-                      <button
-                        key={event.id}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleEditEvent(event)
-                        }}
-                        className={`w-full rounded-md p-2.5 text-left text-xs ${config.color}`}
-                      >
-                        <div className="flex items-center gap-1.5 font-medium">
-                          <Icon className="h-3.5 w-3.5" />
-                          <span className="truncate">{event.title}</span>
+                        {/* Hover "+" icon - opens sidebar */}
+                        <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDateClick(day)
+                              setShowAddEntryOptions(true)
+                            }}
+                            className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
                         </div>
-                        {event.amount && <div className="mt-1 text-sm font-semibold">${event.amount}</div>}
-                        {event.hours && <div className="mt-0.5 opacity-80">{event.hours}h</div>}
-                      </button>
-                    )
-                  })}
-                </div>
-                      </button>
+                        <div className="flex-1 space-y-1.5">
+                          {events.map((event) => {
+                            const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
+                            const Icon = config.icon
+                            return (
+                              <button
+                                key={event.id}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleEditEvent(event)
+                                }}
+                                className={`w-full rounded-md p-2.5 text-left text-xs ${config.color}`}
+                              >
+                                <div className="flex items-center gap-1.5 font-medium">
+                                  <Icon className="h-3.5 w-3.5" />
+                                  <span className="truncate">{event.title}</span>
+                                </div>
+                                {event.amount && <div className="mt-1 text-sm font-semibold">${event.amount}</div>}
+                                {event.hours && <div className="mt-0.5 opacity-80">{event.hours}h</div>}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
                     )
                   })}
                 </div>
@@ -2650,6 +2935,163 @@ onClick={() => {
         </div>
       </div>
 
+      {/* Daily Entries Sheet - Opens when clicking a date */}
+      <Sheet open={isDailyEntriesOpen} onOpenChange={(open) => {
+        setIsDailyEntriesOpen(open)
+        if (!open) setShowAddEntryOptions(false)
+      }}>
+        <SheetContent className="flex h-full max-h-screen w-full flex-col overflow-hidden p-0 sm:max-w-sm">
+          <SheetHeader className="shrink-0 border-b border-border px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <SheetTitle className="text-base">
+                  {dailyEntriesDate?.toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                </SheetTitle>
+                <SheetDescription className="mt-0.5">
+                  {(() => {
+                    const entries = dailyEntriesDate ? getEventsForDate(dailyEntriesDate) : []
+                    return entries.length === 0 
+                      ? 'No entries' 
+                      : `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
+                  })()}
+                </SheetDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 bg-transparent"
+                onClick={() => setShowAddEntryOptions(!showAddEntryOptions)}
+              >
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            </div>
+            
+            {/* Add Entry Options - Collapsible */}
+            {showAddEntryOptions && (
+              <div className="mt-3 grid grid-cols-5 gap-2">
+                {[
+                  { type: 'work', icon: Briefcase, label: 'Work done' },
+                  { type: 'time', icon: Clock, label: 'Time' },
+                  { type: 'expense', icon: Receipt, label: 'Expenses' },
+                  { type: 'travel', icon: Car, label: 'Travels' },
+                  { type: 'note', icon: FileText, label: 'Note' },
+                ].map((item) => {
+                  const config = eventTypeConfig[item.type as keyof typeof eventTypeConfig]
+                  return (
+                    <Button
+                      key={item.type}
+                      variant="outline"
+                      className="h-auto flex-col gap-1 bg-transparent px-2 py-2"
+                      onClick={() => handleAddNewFromDailyPanel(item.type)}
+                    >
+                      <div className={`rounded p-1 ${config.color}`}>
+                        <item.icon className="h-3.5 w-3.5" />
+                      </div>
+                      <span className="text-[10px]">{item.label}</span>
+                    </Button>
+                  )
+                })}
+              </div>
+            )}
+          </SheetHeader>
+
+          <ScrollArea className="flex-1">
+            <div className="px-4 py-3">
+              {(() => {
+                const entries = dailyEntriesDate ? getEventsForDate(dailyEntriesDate) : []
+                
+                if (entries.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <div className="mb-3 rounded-full bg-muted p-3">
+                        <CalendarX className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                      <p className="text-sm font-medium text-foreground">No entries yet</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Click the Add button to create an entry
+                      </p>
+                    </div>
+                  )
+                }
+
+                // Group entries by type
+                const groupedEntries = entries.reduce((acc, entry) => {
+                  const type = entry.type
+                  if (!acc[type]) acc[type] = []
+                  acc[type].push(entry)
+                  return acc
+                }, {} as Record<string, CalendarEvent[]>)
+
+                return (
+                  <div className="space-y-4">
+                    {Object.entries(groupedEntries).map(([type, typeEntries]) => {
+                      const config = eventTypeConfig[type as keyof typeof eventTypeConfig]
+                      if (!config) return null
+                      
+                      return (
+                        <div key={type}>
+                          <div className="mb-2 flex items-center gap-2">
+                            <div className={`h-2 w-2 rounded-full ${config.dotColor}`} />
+                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              {config.label}
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {typeEntries.map((entry) => {
+                              const Icon = config.icon
+                              return (
+                                <div
+                                  key={entry.id}
+                                  className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-accent/50"
+                                >
+                                  <div className={`shrink-0 rounded-md p-1.5 ${config.color}`}>
+                                    <Icon className="h-4 w-4" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium">{entry.title}</p>
+                                    {entry.amount !== undefined && (
+                                      <p className="text-xs text-muted-foreground">
+                                        ${entry.amount.toLocaleString()}
+                                      </p>
+                                    )}
+                                    {entry.hours && (
+                                      <p className="text-xs text-muted-foreground">{entry.hours}h</p>
+                                    )}
+                                    {entry.client && (
+                                      <p className="text-xs text-muted-foreground">{entry.client}</p>
+                                    )}
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                                    onClick={() => {
+                                      setIsDailyEntriesOpen(false)
+                                      handleEditEvent(entry)
+                                    }}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+            </div>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
+
       {/* Inline Edit Sheet - Responsive with Scrollbar */}
       <Sheet open={isEditSheetOpen} onOpenChange={setIsEditSheetOpen}>
         <SheetContent className="flex h-full max-h-screen w-full flex-col overflow-hidden p-0 sm:max-w-md">
@@ -2719,10 +3161,14 @@ onClick={() => {
                 {/* Date - Always visible */}
                 <div className="space-y-2">
                   <Label className="text-xs">Date</Label>
-                  <Input
-                    type="date"
-                    value={editingEvent.date}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, date: e.target.value })}
+                  <DatePicker
+                    date={editingEvent.date ? parseDateString(editingEvent.date) : new Date()}
+                    onDateChange={(date) => {
+                      if (date) {
+                        setEditingEvent({ ...editingEvent, date: formatDateToLocal(date) })
+                      }
+                    }}
+                    placeholder="Select date"
                     className="h-10 sm:h-9"
                   />
                 </div>
@@ -2763,11 +3209,11 @@ onClick={() => {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs">Client</Label>
+                      <Label className="text-xs">Contact</Label>
                       {isAddingClientInEdit ? (
                         <div className="flex gap-2">
                           <Input
-                            placeholder="Enter client name"
+                            placeholder="Enter contact name"
                             value={newClientName}
                             onChange={(e) => setNewClientName(e.target.value)}
                             className="h-10 sm:h-9"
@@ -2812,7 +3258,7 @@ onClick={() => {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">No client</SelectItem>
-                              {contacts.map((contact) => (
+                              {sortAlphabetically(contacts).map((contact) => (
                                 <SelectItem key={contact.id} value={contact.name}>
                                   {contact.name}
                                 </SelectItem>
@@ -2865,7 +3311,7 @@ onClick={() => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">No category</SelectItem>
-                          {CATEGORIES.map((cat) => (
+                          {sortAlphabetically(CATEGORIES).map((cat) => (
                             <SelectItem key={cat.id} value={cat.id}>
                               {cat.label}
                             </SelectItem>
@@ -2886,7 +3332,7 @@ onClick={() => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Not specified</SelectItem>
-                          {PAYMENT_METHODS.map((method) => (
+                          {sortAlphabetically(PAYMENT_METHODS).map((method) => (
                             <SelectItem key={method.id} value={method.id}>
                               {method.label}
                             </SelectItem>
@@ -2911,11 +3357,11 @@ onClick={() => {
                 {editingEvent.type === 'invoice' && (
                   <>
                     <div className="space-y-2">
-                      <Label className="text-xs">Client</Label>
+                      <Label className="text-xs">Contact</Label>
                       {isAddingClientInEdit ? (
                         <div className="flex gap-2">
                           <Input
-                            placeholder="Enter client name"
+                            placeholder="Enter contact name"
                             value={newClientName}
                             onChange={(e) => setNewClientName(e.target.value)}
                             className="h-10 sm:h-9"
@@ -2960,7 +3406,7 @@ onClick={() => {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">No client</SelectItem>
-                              {contacts.map((contact) => (
+                              {sortAlphabetically(contacts).map((contact) => (
                                 <SelectItem key={contact.id} value={contact.name}>
                                   {contact.name}
                                 </SelectItem>
@@ -3086,11 +3532,11 @@ onClick={() => {
                 {editingEvent.type === 'meeting' && (
                   <>
                     <div className="space-y-2">
-                      <Label className="text-xs">Client</Label>
+                      <Label className="text-xs">Contact</Label>
                       {isAddingClientInEdit ? (
                         <div className="flex gap-2">
                           <Input
-                            placeholder="Enter client name"
+                            placeholder="Enter contact name"
                             value={newClientName}
                             onChange={(e) => setNewClientName(e.target.value)}
                             className="h-10 sm:h-9"
@@ -3135,7 +3581,7 @@ onClick={() => {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">No client</SelectItem>
-                              {contacts.map((contact) => (
+                              {sortAlphabetically(contacts).map((contact) => (
                                 <SelectItem key={contact.id} value={contact.name}>
                                   {contact.name}
                                 </SelectItem>

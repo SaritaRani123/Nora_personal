@@ -54,6 +54,17 @@ export interface Contact {
   address: string
 }
 
+export interface WorkDoneEntry {
+  id: string
+  date: string
+  contact: string
+  description: string
+  hours: number
+  rate: number
+  amount: number
+  invoiceId: string | null // null = unbilled, string = linked to invoice
+}
+
 interface DataStore {
   // Expenses
   expenses: Expense[]
@@ -78,6 +89,13 @@ interface DataStore {
   addContact: (contact: Omit<Contact, 'id'>) => string
   updateContact: (id: string, contact: Partial<Contact>) => void
   deleteContact: (id: string) => void
+
+  // Work Done entries
+  workDoneEntries: WorkDoneEntry[]
+  addWorkDoneEntry: (entry: Omit<WorkDoneEntry, 'id'>) => string
+  updateWorkDoneEntry: (id: string, entry: Partial<WorkDoneEntry>) => void
+  deleteWorkDoneEntry: (id: string) => void
+  markWorkDoneAsInvoiced: (ids: string[], invoiceId: string) => void
 }
 
 // Additional expenses for initial data
@@ -94,6 +112,7 @@ export const useDataStore = create<DataStore>((set, get) => ({
   invoices: initialInvoices.map(i => ({ ...i, source: 'manual' as const })),
   income: [...initialIncome],
   contacts: [...initialContacts],
+  workDoneEntries: [],
 
   // Expense actions
   addExpense: (expense) => {
@@ -169,6 +188,34 @@ export const useDataStore = create<DataStore>((set, get) => ({
   deleteContact: (id) => {
     set((state) => ({
       contacts: state.contacts.filter((c) => c.id !== id),
+    }))
+  },
+
+  // Work Done entry actions
+  addWorkDoneEntry: (entry) => {
+    const id = `work-${Date.now()}`
+    set((state) => ({
+      workDoneEntries: [{ ...entry, id }, ...state.workDoneEntries],
+    }))
+    return id
+  },
+  updateWorkDoneEntry: (id, entry) => {
+    set((state) => ({
+      workDoneEntries: state.workDoneEntries.map((w) =>
+        w.id === id ? { ...w, ...entry } : w
+      ),
+    }))
+  },
+  deleteWorkDoneEntry: (id) => {
+    set((state) => ({
+      workDoneEntries: state.workDoneEntries.filter((w) => w.id !== id),
+    }))
+  },
+  markWorkDoneAsInvoiced: (ids, invoiceId) => {
+    set((state) => ({
+      workDoneEntries: state.workDoneEntries.map((w) =>
+        ids.includes(w.id) ? { ...w, invoiceId } : w
+      ),
     }))
   },
 }))

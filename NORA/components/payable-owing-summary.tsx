@@ -7,7 +7,7 @@ import { ArrowUpRight, ArrowDownLeft, ChevronRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import type { BucketData, PayableSummaryResponse } from '@/lib/api/payable-summary'
+import { fetchPayableSummary, type BucketData, type PayableSummaryResponse } from '@/lib/services/payable-summary'
 
 // ============================================================
 // Payable & Owing Summary Component
@@ -19,8 +19,6 @@ import type { BucketData, PayableSummaryResponse } from '@/lib/api/payable-summa
 // 1. Update lib/api/payable-summary.ts with your AWS endpoint
 // 2. No changes needed in this component
 // ============================================================
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -202,14 +200,15 @@ function LoadingSkeleton() {
 }
 
 export function PayableOwingSummary() {
-  const { data, isLoading, error } = useSWR<PayableSummaryResponse>(
-    '/api/payable-summary',
-    fetcher,
+  const { data: dataArr, isLoading, error } = useSWR<PayableSummaryResponse[]>(
+    'payable-summary',
+    fetchPayableSummary,
     {
       refreshInterval: 30000, // Refresh every 30 seconds
       revalidateOnFocus: true,
     }
   )
+  const data = dataArr?.[0]
 
   if (isLoading) {
     return (

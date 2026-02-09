@@ -13,20 +13,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const fetcher = async (url: string) => {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error('Failed to fetch chart data')
-  }
-  return response.json()
-}
+import { getCharts, type ChartData } from '@/lib/services/charts'
 
 const COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#eab308', '#a855f7', '#6b7280']
 
-interface ChartData {
-  incomeExpenseData: { month: string; income: number; expenses: number }[]
-  categoryData: { name: string; value: number }[]
-}
 
 interface ActiveShapeProps {
   cx: number
@@ -120,8 +110,8 @@ export function CategoryChart({ compact = false, showTooltip = false }: Category
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
   
   const { data, isLoading, error } = useSWR<ChartData>(
-    `/api/charts?range=${dateRange}`,
-    fetcher,
+    ['charts', dateRange],
+    () => getCharts(dateRange),
     {
       revalidateOnFocus: false,
       dedupingInterval: 5000,

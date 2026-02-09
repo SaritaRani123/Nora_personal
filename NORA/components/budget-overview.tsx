@@ -2,9 +2,27 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
-import { budgetData } from '@/lib/mock-data'
+import useSWR from 'swr'
+import { getBudgetOverview, type BudgetOverviewData } from '@/lib/services/budget'
 
 export function BudgetOverview() {
+  const { data: budgetArr = [] } = useSWR<BudgetOverviewData[]>('budget', () => getBudgetOverview())
+  const budgetData = budgetArr[0]
+
+  if (!budgetData) {
+    return (
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <CardTitle className="text-card-foreground">Budget Overview</CardTitle>
+          <CardDescription>Expense budget</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="text-sm text-muted-foreground">Loading budget...</div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   const percentSpent = (budgetData.spent / budgetData.totalBudget) * 100
   const remaining = budgetData.totalBudget - budgetData.spent
 

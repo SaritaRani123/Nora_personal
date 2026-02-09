@@ -49,6 +49,15 @@ import {
   type Category,
 } from '@/lib/services/expenses'
 
+// Helper function for case-insensitive alphabetical sorting
+const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => {
+    const nameA = (a.name || a.label || '').toLowerCase()
+    const nameB = (b.name || b.label || '').toLowerCase()
+    return nameA.localeCompare(nameB)
+  })
+}
+
 // SWR fetcher functions
 const expensesFetcher = () => listExpenses()
 const categoriesFetcher = () => listCategories()
@@ -334,8 +343,8 @@ export default function ExpensesPage() {
                         <span className="sr-only">Info about Total Expenses</span>
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[220px]">
-                      <p>Sum of all expenses in the selected date range and category filter.</p>
+                    <TooltipContent side="top">
+                      Sum of all expenses in the selected date range and category filter.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -361,8 +370,8 @@ export default function ExpensesPage() {
                         <span className="sr-only">Info about This Month</span>
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[220px]">
-                      <p>Total expenses recorded in the current calendar month, compared to the previous month.</p>
+                    <TooltipContent side="top">
+                      Total expenses recorded in the current calendar month, compared to the previous month.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -388,8 +397,8 @@ export default function ExpensesPage() {
                         <span className="sr-only">Info about Average per Day</span>
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[220px]">
-                      <p>Average daily spending calculated from the last 30 days of expenses.</p>
+                    <TooltipContent side="top">
+                      Average daily spending calculated from the last 30 days of expenses.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -415,8 +424,8 @@ export default function ExpensesPage() {
                         <span className="sr-only">Info about Pending Review</span>
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[220px]">
-                      <p>Expenses that are uncategorized or flagged for manual review and categorization.</p>
+                    <TooltipContent side="top">
+                      Expenses that are uncategorized or flagged for manual review and categorization.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -463,7 +472,7 @@ export default function ExpensesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Categories</SelectItem>
-                    {categories.map((cat) => (
+                    {sortAlphabetically(categories).map((cat) => (
                       <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -544,6 +553,8 @@ export default function ExpensesPage() {
                           startMonth={new Date(2020, 0)}
                           endMonth={new Date(2030, 11)}
                           initialFocus
+                          fixedWeeks
+                          showOutsideDays
                         />
                       </div>
                       <div>
@@ -559,6 +570,8 @@ export default function ExpensesPage() {
                           startMonth={new Date(2020, 0)}
                           endMonth={new Date(2030, 11)}
                           disabled={(date) => dateRange.from ? date < dateRange.from : false}
+                          fixedWeeks
+                          showOutsideDays
                         />
                       </div>
                     </div>

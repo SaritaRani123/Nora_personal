@@ -44,22 +44,10 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json())
-
-interface Contact {
-  id: string
-  name: string
-  email: string
-  phone: string
-  address: string
-}
-
-interface ContactsData {
-  contacts: Contact[]
-}
+import { listContacts, createContact, updateContact, deleteContact, type Contact } from '@/lib/services/contacts'
 
 export default function ContactsPage() {
-  const { data, isLoading } = useSWR<ContactsData>('/api/contacts', fetcher)
+  const { data, isLoading, mutate } = useSWR<Contact[]>('contacts', listContacts)
   const [searchQuery, setSearchQuery] = useState('')
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -72,7 +60,7 @@ export default function ContactsPage() {
     address: '',
   })
 
-  const contacts = data?.contacts || []
+  const contacts = data ?? []
 
   const filteredContacts = contacts.filter((contact) => {
     const query = searchQuery.toLowerCase()
@@ -93,24 +81,16 @@ export default function ContactsPage() {
   }
 
   const handleCreate = async () => {
-    await fetch('/api/contacts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData),
-    })
-    mutate('/api/contacts')
+    await createContact({ name: formData.name, email: formData.email, phone: formData.phone, address: formData.address })
+    mutate()
     setIsCreateOpen(false)
     resetForm()
   }
 
   const handleEdit = async () => {
     if (!selectedContact) return
-    await fetch('/api/contacts', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: selectedContact.id, ...formData }),
-    })
-    mutate('/api/contacts')
+    await updateContact(selectedContact.id, { name: formData.name, email: formData.email, phone: formData.phone, address: formData.address })
+    mutate()
     setIsEditOpen(false)
     setSelectedContact(null)
     resetForm()
@@ -118,10 +98,8 @@ export default function ContactsPage() {
 
   const handleDelete = async () => {
     if (!selectedContact) return
-    await fetch(`/api/contacts?id=${selectedContact.id}`, {
-      method: 'DELETE',
-    })
-    mutate('/api/contacts')
+    await deleteContact(selectedContact.id)
+    mutate()
     setIsDeleteOpen(false)
     setSelectedContact(null)
   }

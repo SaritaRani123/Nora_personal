@@ -15,18 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const fetcher = async (url: string) => {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error('Failed to fetch chart data')
-  }
-  return response.json()
-}
-
-interface ChartData {
-  incomeExpenseData: { month: string; income: number; expenses: number }[]
-  categoryData: { name: string; value: number }[]
-}
+import { getCharts, type ChartData } from '@/lib/services/charts'
 
 export function IncomeExpenseChart() {
   const [dateRange, setDateRange] = useState<'12' | '24'>('12')
@@ -34,8 +23,8 @@ export function IncomeExpenseChart() {
   const [showExpenses, setShowExpenses] = useState(true)
   
   const { data, isLoading, error } = useSWR<ChartData>(
-    `/api/charts?range=${dateRange}`,
-    fetcher,
+    ['charts', dateRange],
+    () => getCharts(dateRange),
     {
       revalidateOnFocus: false,
       dedupingInterval: 5000,

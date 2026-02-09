@@ -70,8 +70,23 @@ export async function POST(request: Request) {
       bank = 'RBC'
     }
 
-    // Generate mock transaction count
-    const transactions = Math.floor(Math.random() * 50) + 20
+    // Generate mock transaction details
+    const mockTransactionDetails = [
+      { category: 'Food & Dining', amount: 45.99, date: '2026-01-24', type: 'debit' as const },
+      { category: 'Office Expenses', amount: 234.50, date: '2026-01-23', type: 'debit' as const },
+      { category: 'Client Payment', amount: 5000.00, date: '2026-01-22', type: 'credit' as const },
+      { category: 'Fuel & Commute', amount: 78.00, date: '2026-01-21', type: 'debit' as const },
+      { category: 'Software & Subscriptions', amount: 54.99, date: '2026-01-20', type: 'debit' as const },
+      { category: 'Invoice Payment', amount: 2500.00, date: '2026-01-19', type: 'credit' as const },
+      { category: 'Utilities', amount: 189.45, date: '2026-01-18', type: 'debit' as const },
+      { category: 'Marketing & Advertising', amount: 500.00, date: '2026-01-17', type: 'debit' as const },
+      { category: 'Travel & Accommodation', amount: 325.00, date: '2026-01-16', type: 'debit' as const },
+      { category: 'Consulting Fee', amount: 3000.00, date: '2026-01-15', type: 'credit' as const },
+      { category: 'Insurance', amount: 450.00, date: '2026-01-14', type: 'debit' as const },
+      { category: 'Refund - Product Return', amount: 120.00, date: '2026-01-13', type: 'credit' as const },
+    ]
+
+    const transactions = mockTransactionDetails.length
 
     return NextResponse.json({
       success: true,
@@ -79,6 +94,7 @@ export async function POST(request: Request) {
       fileSize: file.size,
       bank,
       transactions,
+      transactionDetails: mockTransactionDetails,
       s3Key: `statements/${Date.now()}-${file.name}`,
       message: 'File uploaded successfully',
     })

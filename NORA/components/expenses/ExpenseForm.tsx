@@ -61,6 +61,15 @@ import type {
 } from '@/types/expense'
 import type { Expense as LegacyExpense } from '@/lib/services/expenses'
 
+// Helper function for case-insensitive alphabetical sorting
+const sortAlphabetically = <T extends { name?: string; label?: string; code?: string }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => {
+    const nameA = (a.name || a.label || a.code || '').toLowerCase()
+    const nameB = (b.name || b.label || b.code || '').toLowerCase()
+    return nameA.localeCompare(nameB)
+  })
+}
+
 // Expense status options
 export const EXPENSE_STATUS_OPTIONS = [
   { value: 'paid', label: 'Paid', color: 'bg-green-500/10 text-green-600 border-green-500/20' },
@@ -410,6 +419,8 @@ export function ExpenseForm({
                         captionLayout="dropdown"
                         fromYear={2000}
                         toYear={2100}
+                        fixedWeeks
+                        showOutsideDays
                       />
                     </PopoverContent>
                   </Popover>
@@ -433,7 +444,7 @@ export function ExpenseForm({
                       ) : categories.length === 0 ? (
                         <SelectEmpty message="No categories available" />
                       ) : (
-                        categories.map((cat) => (
+                        sortAlphabetically(categories).map((cat) => (
                           <SelectItem key={cat.id} value={cat.id}>
                             {cat.name}
                           </SelectItem>
@@ -483,7 +494,7 @@ export function ExpenseForm({
                         ) : vendors.length === 0 ? (
                           <SelectEmpty message="No vendors available" />
                         ) : (
-                          vendors.map((vendor) => (
+                          sortAlphabetically(vendors).map((vendor) => (
                             <SelectItem key={vendor.id} value={vendor.id}>
                               {vendor.name}
                             </SelectItem>
@@ -515,7 +526,7 @@ export function ExpenseForm({
                           {clients.length === 0 ? (
                             <SelectEmpty message="No clients available" />
                           ) : (
-                            clients.map((client) => (
+                            sortAlphabetically(clients).map((client) => (
                               <SelectItem key={client.id} value={client.id}>
                                 {client.name}
                               </SelectItem>
@@ -561,7 +572,7 @@ export function ExpenseForm({
                           ) : paymentMethods.length === 0 ? (
                             <SelectEmpty message="No payment methods available" />
                           ) : (
-                            paymentMethods.map((method) => (
+                            sortAlphabetically(paymentMethods).map((method) => (
                               <SelectItem key={method.id} value={method.id}>
                                 {method.name}
                               </SelectItem>
@@ -658,7 +669,7 @@ export function ExpenseForm({
                         ) : repeatFrequencies.length === 0 ? (
                           <SelectEmpty message="No frequencies available" />
                         ) : (
-                          repeatFrequencies.map((freq) => (
+                          sortAlphabetically(repeatFrequencies).map((freq) => (
                             <SelectItem key={freq.id} value={freq.id}>
                               {freq.name}
                             </SelectItem>
@@ -720,7 +731,7 @@ export function ExpenseForm({
                         ) : currencies.length === 0 ? (
                           <SelectEmpty message="No currencies available" />
                         ) : (
-                          currencies.map((currency) => (
+                          sortAlphabetically(currencies).map((currency) => (
                             <SelectItem key={currency.code} value={currency.code}>
                               {currency.code}
                             </SelectItem>
@@ -762,7 +773,7 @@ export function ExpenseForm({
                           ) : taxRates.length === 0 ? (
                             <SelectEmpty message="No tax rates available" />
                           ) : (
-                            taxRates.map((tax) => (
+                            sortAlphabetically(taxRates).map((tax) => (
                               <SelectItem key={tax.id} value={tax.id}>
                                 {tax.name}
                               </SelectItem>

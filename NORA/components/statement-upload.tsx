@@ -8,12 +8,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
-import { statements } from '@/lib/mock-data'
+import useSWR, { mutate } from 'swr'
+import { listStatements, uploadStatement, type Statement } from '@/lib/services/statements'
 
 export function StatementUpload() {
   const [isDragging, setIsDragging] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'completed'>('idle')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  const { data: statements = [] } = useSWR<Statement[]>('statements', () => listStatements())
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -28,12 +32,16 @@ export function StatementUpload() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-    simulateUpload()
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      void handleUpload(file)
+    }
   }, [])
 
-  const simulateUpload = () => {
+  const handleUpload = async (file: File) => {
     setUploadStatus('uploading')
     setUploadProgress(0)
+    setSelectedFile(file)
     
     const interval = setInterval(() => {
       setUploadProgress((prev) => {
@@ -41,13 +49,19 @@ export function StatementUpload() {
         if (prev >= 100) {
           clearInterval(interval)
           setUploadStatus('processing')
-          setTimeout(() => {
-            setUploadStatus('completed')
-            setTimeout(() => {
-              setUploadStatus('idle')
-              setUploadProgress(null)
-            }, 2000)
-          }, 1500)
+          void (async () => {
+            try {
+              await uploadStatement(file)
+              await mutate('statements')
+              setUploadStatus('completed')
+            } finally {
+              setTimeout(() => {
+                setUploadStatus('idle')
+                setUploadProgress(null)
+                setSelectedFile(null)
+              }, 2000)
+            }
+          })()
           return 100
         }
         return prev + 10
@@ -71,8 +85,23 @@ export function StatementUpload() {
             ${isDragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/30'}
             ${uploadStatus !== 'idle' ? 'pointer-events-none' : 'cursor-pointer'}
           `}
-          onClick={() => uploadStatus === 'idle' && simulateUpload()}
+          onClick={() => {
+            if (uploadStatus !== 'idle') return
+            // fallback: open file picker via hidden input
+            document.getElementById('statement-upload-input')?.click()
+          }}
         >
+          <input
+            id="statement-upload-input"
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) void handleUpload(file)
+              e.currentTarget.value = ''
+            }}
+          />
           {uploadStatus === 'idle' && (
             <>
               <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
@@ -96,7 +125,7 @@ export function StatementUpload() {
                 <FileText className="h-8 w-8 text-primary" />
                 <div className="flex-1">
                   <p className="text-sm font-medium text-foreground">Uploading...</p>
-                  <p className="text-xs text-muted-foreground">scotia_jan_2025.pdf</p>
+                  <p className="text-xs text-muted-foreground">{selectedFile?.name || 'statement.pdf'}</p>
                 </div>
               </div>
               <Progress value={uploadProgress ?? 0} className="h-2" />

@@ -4,20 +4,21 @@ import useSWR from 'swr'
 import { TrendingUp, TrendingDown, DollarSign, Receipt, Wallet } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json())
-
-interface StatsData {
-  totalIncome: number
-  totalExpenses: number
-  netProfit: number
-  incomeChange: string
-  expensesChange: string
-  profitChange: string
-}
+import { listInvoices, type Invoice } from '@/lib/services/invoices'
+import { listExpenses, type Expense } from '@/lib/services/expenses'
 
 export function StatsCards() {
-  const { data, isLoading } = useSWR<StatsData>('/api/stats', fetcher)
+  const {
+    data: invoices,
+    isLoading: invoicesLoading,
+  } = useSWR<Invoice[]>('invoices', listInvoices)
+
+  const {
+    data: expenses,
+    isLoading: expensesLoading,
+  } = useSWR<Expense[]>('expenses', () => listExpenses())
+
+  const isLoading = invoicesLoading || expensesLoading
 
   if (isLoading) {
     return (
@@ -38,28 +39,43 @@ export function StatsCards() {
     )
   }
 
+  const invoicesSafe = invoices ?? []
+  const expensesSafe = expenses ?? []
+
+  // Total Income: sum of paid invoices
+  const totalIncome = invoicesSafe
+    .filter((inv) => inv.status === 'paid')
+    .reduce((sum, inv) => sum + (inv.amount || 0), 0)
+
+  // Total Expenses: sum of paid expenses
+  const totalExpenses = expensesSafe
+    .filter((exp) => exp.status === 'paid')
+    .reduce((sum, exp) => sum + (exp.amount || 0), 0)
+
+  const netProfit = totalIncome - totalExpenses
+
   const stats = [
     {
       title: 'Total Income',
-      value: `$${data?.totalIncome?.toLocaleString() || '0'}`,
-      change: data?.incomeChange || '+0%',
-      trend: 'up',
+      value: `$${totalIncome.toLocaleString()}`,
+      change: '+0%',
+      trend: 'up' as 'up' | 'down' | 'flat',
       icon: DollarSign,
       description: 'vs last month',
     },
     {
       title: 'Total Expenses',
-      value: `$${data?.totalExpenses?.toLocaleString() || '0'}`,
-      change: data?.expensesChange || '+0%',
-      trend: 'up',
+      value: `$${totalExpenses.toLocaleString()}`,
+      change: '+0%',
+      trend: 'up' as 'up' | 'down' | 'flat',
       icon: Receipt,
       description: 'vs last month',
     },
     {
       title: 'Net Profit',
-      value: `$${data?.netProfit?.toLocaleString() || '0'}`,
-      change: data?.profitChange || '+0%',
-      trend: 'up',
+      value: `$${netProfit.toLocaleString()}`,
+      change: '+0%',
+      trend: netProfit >= 0 ? ('up' as const) : ('down' as const),
       icon: Wallet,
       description: 'vs last month',
     },
@@ -82,7 +98,15 @@ export function StatsCards() {
             <div className="flex items-center gap-1 text-xs">
               {stat.trend === 'up' && <TrendingUp className="h-3 w-3 text-primary" />}
               {stat.trend === 'down' && <TrendingDown className="h-3 w-3 text-destructive" />}
-              <span className={stat.trend === 'up' ? 'text-primary' : stat.trend === 'down' ? 'text-destructive' : 'text-muted-foreground'}>
+              <span
+                className={
+                  stat.trend === 'up'
+                    ? 'text-primary'
+                    : stat.trend === 'down'
+                    ? 'text-destructive'
+                    : 'text-muted-foreground'
+                }
+              >
                 {stat.change}
               </span>
               <span className="text-muted-foreground">{stat.description}</span>

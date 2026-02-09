@@ -63,7 +63,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useDataStore, type Invoice } from '@/lib/data-store'
+import { Checkbox } from '@/components/ui/checkbox'
+import useSWR, { mutate } from 'swr'
+import { listInvoices, createInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
 
 const statusConfig = {
   paid: { label: 'Paid', variant: 'default' as const, icon: CheckCircle2, color: 'text-success bg-success/10' },
@@ -80,8 +82,7 @@ const InvoicesPage = () => {
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   
-  // Use data store for cross-page data consistency
-  const { invoices, addInvoice, deleteInvoice } = useDataStore()
+  const { data: invoices = [] } = useSWR<Invoice[]>('invoices', () => listInvoices())
 
   // Calculate stats from invoices
   const stats = useMemo(() => ({
@@ -241,7 +242,8 @@ const InvoicesPage = () => {
 
   // Handle Duplicate
   const handleDuplicate = (invoice: Invoice) => {
-    addInvoice({
+    void (async () => {
+      await createInvoice({
       client: invoice.client,
       email: invoice.email,
       amount: invoice.amount,
@@ -249,14 +251,19 @@ const InvoicesPage = () => {
       issueDate: new Date().toISOString().split('T')[0],
       dueDate: invoice.dueDate,
       paidDate: null,
-    })
+      })
+      await mutate('invoices')
+    })()
   }
 
   // Handle Delete
   const handleDelete = () => {
     if (invoiceToDelete) {
-      deleteInvoice(invoiceToDelete.id)
-      setInvoiceToDelete(null)
+      void (async () => {
+        await deleteInvoiceApi(invoiceToDelete.id)
+        setInvoiceToDelete(null)
+        await mutate('invoices')
+      })()
     }
   }
 
@@ -346,7 +353,7 @@ const InvoicesPage = () => {
             <TableHeader>
               <TableRow>
                 <TableHead>Invoice</TableHead>
-                <TableHead>Client</TableHead>
+                <TableHead>Contact</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Due Date</TableHead>

@@ -2,13 +2,12 @@
 
 import type React from 'react'
 import { useState, useCallback, useRef } from 'react'
-import useSWR, { mutate } from 'swr'
+import useSWR, { mutate as revalidateKey } from 'swr'
 import {
   Upload,
   FileText,
   CheckCircle,
   Clock,
-  Trash2,
   Calendar,
   AlertCircle,
   X,
@@ -56,31 +55,26 @@ import {
 } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json())
-
-type Statement = {
-  id: string
-  fileName: string
-  uploadDate: string
-  transactions: number
-  bank: string
-  accountType: 'Chequing' | 'Credit Card'
-}
+import { getStatementsWithStats, uploadStatement, getStatementTransactions, saveStatement, type Statement, type StatementsStats, type StatementTransaction } from '@/lib/services/statements'
+import { createInvoice } from '@/lib/services/invoices'
+import { createExpense } from '@/lib/services/expenses'
 
 interface StatementsData {
   statements: Statement[]
-  stats: {
-    totalStatements: number
-    totalTransactions: number
-    totalChequingStatements: number
-    totalCreditCardStatements: number
-  }
+  stats: StatementsStats
+}
+
+type TransactionDetail = {
+  category: string
+  amount: number
+  date: string
+  type: 'credit' | 'debit'
 }
 
 type UploadStatus = 'idle' | 'selected' | 'uploading' | 'processing' | 'completed' | 'error'
 
 export default function StatementsPage() {
-  const { data, isLoading } = useSWR<StatementsData>('/api/statements', fetcher)
+  const { data, isLoading, mutate } = useSWR<StatementsData>('statements', getStatementsWithStats)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -98,10 +92,23 @@ export default function StatementsPage() {
   const [accountTypeFilter, setAccountTypeFilter] = useState('all')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [statementToDelete, setStatementToDelete] = useState<Statement | null>(
-    null
-  )
+
+  // Transaction review dialog state
+  const [transactionDialogOpen, setTransactionDialogOpen] = useState(false)
+  const [extractedTransactions, setExtractedTransactions] = useState<TransactionDetail[]>([])
+  const [pendingStatement, setPendingStatement] = useState<Statement | null>(null)
+  const [pendingUploadData, setPendingUploadData] = useState<{
+    fileName: string
+    bank: string
+    accountType: string
+    transactions: number
+  } | null>(null)
+
+  // View transactions dialog (for viewing statement transactions after upload)
+  const [viewTransactionsOpen, setViewTransactionsOpen] = useState(false)
+  const [viewTransactionsStatement, setViewTransactionsStatement] = useState<Statement | null>(null)
+  const [viewTransactionsList, setViewTransactionsList] = useState<StatementTransaction[]>([])
+  const [viewTransactionsLoading, setViewTransactionsLoading] = useState(false)
 
   const statements = data?.statements || []
   const stats = data?.stats || {
@@ -132,14 +139,12 @@ export default function StatementsPage() {
   }, [])
 
   const handleFileSelect = (file: File) => {
-    // Validate file type
     if (file.type !== 'application/pdf') {
       setUploadError('Only PDF files are supported')
       setUploadStatus('error')
       return
     }
 
-    // Validate file size (max 10MB)
     const maxSize = 10 * 1024 * 1024
     if (file.size > maxSize) {
       setUploadError('File size exceeds 10MB limit')
@@ -184,7 +189,6 @@ export default function StatementsPage() {
     setUploadError(null)
 
     try {
-      // Simulate progress while uploading
       const progressInterval = setInterval(() => {
         setUploadProgress((prev) => {
           if (prev >= 90) {
@@ -195,55 +199,51 @@ export default function StatementsPage() {
         })
       }, 150)
 
-      // Create form data and upload
-      const formData = new FormData()
-      formData.append('file', selectedFile)
-
-      const uploadResponse = await fetch('/api/statements/upload', {
-        method: 'POST',
-        body: formData,
-      })
+      const uploaded = await uploadStatement(selectedFile, { bank: selectedBank, accountType: selectedAccountType as 'Chequing' | 'Credit Card' })
+      // Do not mutate here; statement is only saved when user clicks Save
 
       clearInterval(progressInterval)
 
-      if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.json()
-        throw new Error(errorData.error || 'Upload failed')
-      }
-
-      const uploadData = await uploadResponse.json()
       setUploadProgress(100)
       setUploadStatus('processing')
 
-      // Simulate AI processing delay
       await new Promise((resolve) => setTimeout(resolve, 1500))
 
-      // Add statement to the list via API (use selected bank and account type from dropdowns)
-      await fetch('/api/statements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: selectedFile.name,
-          bank: selectedBank,
-          accountType: selectedAccountType,
-          transactions: uploadData.transactions,
-        }),
+      const newStatement = uploaded[0]
+      setPendingStatement(newStatement ?? null)
+      const transactionCount = newStatement?.transactions ?? (newStatement?.transactionsList?.length ?? 0)
+      setPendingUploadData({
+        fileName: selectedFile.name,
+        bank: selectedBank,
+        accountType: selectedAccountType,
+        transactions: transactionCount,
       })
-
       setUploadResult({
-        transactions: uploadData.transactions,
+        transactions: transactionCount,
         bank: selectedBank,
         accountType: selectedAccountType,
       })
       setUploadStatus('completed')
 
-      // Refresh statements list
-      mutate('/api/statements')
+      // Populate dialog with transactions from backend (upload response or fetch by id)
+      let list: StatementTransaction[] = newStatement?.transactionsList ?? []
+      if (list.length === 0 && newStatement?.id) {
+        try {
+          list = await getStatementTransactions(newStatement.id)
+        } catch {
+          list = []
+        }
+      }
+      const mapped: TransactionDetail[] = list.map((txn) => ({
+        category: txn.description ?? '',
+        amount: txn.amount ?? 0,
+        date: txn.date ?? '',
+        type: (txn.type === 'credit' ? 'credit' : 'debit') as 'credit' | 'debit',
+      }))
+      setExtractedTransactions(mapped)
 
-      // Reset after showing success
-      setTimeout(() => {
-        handleClearFile()
-      }, 3000)
+      // Auto-open the transaction review dialog
+      setTransactionDialogOpen(true)
     } catch (error) {
       setUploadError(
         error instanceof Error ? error.message : 'Upload failed. Please try again.'
@@ -252,53 +252,76 @@ export default function StatementsPage() {
     }
   }
 
-  const handleBankChange = async (statementId: string, newBank: string) => {
-    try {
-      await fetch(`/api/statements?id=${statementId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bank: newBank }),
-      })
-      mutate('/api/statements')
-    } catch (error) {
-      console.error('Failed to update bank:', error)
+  const handleSaveTransactions = async () => {
+    if (!pendingStatement) return
+
+    // Persist statement to backend (only saved when user clicks Save)
+    await saveStatement({
+      fileName: pendingStatement.fileName,
+      bank: pendingStatement.bank,
+      accountType: pendingStatement.accountType,
+      transactionsList: pendingStatement.transactionsList ?? [],
+    })
+
+    let autoInvoiceCounter = 1
+    for (const txn of extractedTransactions) {
+      if (txn.type === 'credit') {
+        autoInvoiceCounter++
+        await createInvoice({
+          client: txn.category || 'Bank Credit',
+          email: '',
+          amount: txn.amount,
+          status: 'paid',
+          issueDate: txn.date,
+          dueDate: txn.date,
+          paidDate: txn.date,
+        })
+      } else {
+        await createExpense({
+          date: txn.date,
+          description: txn.category,
+          category: txn.category.toLowerCase().replace(/ & /g, '_').replace(/ /g, '_') || 'office',
+          amount: txn.amount,
+          paymentMethod: 'Bank Statement',
+          source: 'import',
+        })
+      }
     }
+
+    await mutate()
+    revalidateKey('invoices')
+    revalidateKey('expenses')
+
+    setTransactionDialogOpen(false)
+    setPendingUploadData(null)
+    setPendingStatement(null)
+    setExtractedTransactions([])
+    handleClearFile()
   }
 
-  const handleDeleteClick = (statement: Statement) => {
-    setStatementToDelete(statement)
-    setDeleteDialogOpen(true)
-  }
-
-  const confirmDelete = async () => {
-    if (statementToDelete) {
-      await fetch(`/api/statements?id=${statementToDelete.id}`, {
-        method: 'DELETE',
-      })
-      mutate('/api/statements')
-    }
-    setDeleteDialogOpen(false)
-    setStatementToDelete(null)
+  const handleCloseTransactionDialog = () => {
+    setTransactionDialogOpen(false)
+    setPendingUploadData(null)
+    setPendingStatement(null)
+    setExtractedTransactions([])
+    handleClearFile()
   }
 
   const filteredStatements = statements.filter((statement) => {
-    // Bank filter
     if (
       bankFilter !== 'all' &&
-      statement.bank.toLowerCase() !== bankFilter.toLowerCase()
+      (statement.bank ?? '').toLowerCase() !== bankFilter.toLowerCase()
     ) {
       return false
     }
 
-    // Account type filter
     if (
       accountTypeFilter !== 'all' &&
-      statement.accountType.toLowerCase() !== accountTypeFilter.toLowerCase()
+      (statement.accountType ?? '').toLowerCase() !== accountTypeFilter.toLowerCase()
     ) {
       return false
     }
 
-    // Date range filter
     const uploadDate = new Date(statement.uploadDate)
     if (fromDate) {
       const from = new Date(fromDate)
@@ -322,6 +345,31 @@ export default function StatementsPage() {
   const clearDateFilters = () => {
     setFromDate('')
     setToDate('')
+  }
+
+  const openViewTransactions = async (statement: Statement) => {
+    setViewTransactionsStatement(statement)
+    setViewTransactionsOpen(true)
+    if (statement.transactionsList?.length) {
+      setViewTransactionsList(statement.transactionsList)
+      return
+    }
+    setViewTransactionsLoading(true)
+    setViewTransactionsList([])
+    try {
+      const list = await getStatementTransactions(statement.id)
+      setViewTransactionsList(list)
+    } catch {
+      setViewTransactionsList([])
+    } finally {
+      setViewTransactionsLoading(false)
+    }
+  }
+
+  const closeViewTransactions = () => {
+    setViewTransactionsOpen(false)
+    setViewTransactionsStatement(null)
+    setViewTransactionsList([])
   }
 
   if (isLoading) {
@@ -395,7 +443,7 @@ export default function StatementsPage() {
                 uploadStatus === 'error' && 'border-destructive/50 bg-destructive/5'
               )}
             >
-              {/* Idle State - Drop zone */}
+              {/* Idle State */}
               {uploadStatus === 'idle' && (
                 <>
                   <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -407,7 +455,7 @@ export default function StatementsPage() {
                   <p className="mb-4 text-sm text-muted-foreground text-center">
                     Supports BMO, Scotiabank, TD, and CIBC PDF statements (max 10MB)
                   </p>
-                  <Button 
+                  <Button
                     onClick={(e) => {
                       e.stopPropagation()
                       handleBrowseClick()
@@ -419,7 +467,7 @@ export default function StatementsPage() {
                 </>
               )}
 
-              {/* Selected State - File ready to upload */}
+              {/* Selected State */}
               {uploadStatus === 'selected' && selectedFile && (
                 <div className="w-full max-w-md space-y-4">
                   <div className="flex items-start gap-4 rounded-lg bg-muted/50 p-4">
@@ -443,7 +491,7 @@ export default function StatementsPage() {
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
-                  
+
                   {/* Bank Selection Dropdown */}
                   <div className="space-y-2">
                     <Label htmlFor="bank-select" className="text-sm font-medium text-foreground">
@@ -455,9 +503,9 @@ export default function StatementsPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="BMO" className="cursor-pointer">BMO</SelectItem>
+                        <SelectItem value="CIBC" className="cursor-pointer">CIBC</SelectItem>
                         <SelectItem value="Scotiabank" className="cursor-pointer">Scotiabank</SelectItem>
                         <SelectItem value="TD" className="cursor-pointer">TD</SelectItem>
-                        <SelectItem value="CIBC" className="cursor-pointer">CIBC</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -545,7 +593,7 @@ export default function StatementsPage() {
                       Upload Complete!
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {uploadResult.transactions} transactions from {uploadResult.bank} ({uploadResult.accountType}) successfully categorized
+                      {uploadResult.transactions} transactions from {uploadResult.bank} ({uploadResult.accountType}) extracted
                     </p>
                   </div>
                 </div>
@@ -609,7 +657,7 @@ export default function StatementsPage() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle className="text-card-foreground">All Statements</CardTitle>
-              <CardDescription>View and manage your uploaded bank statements</CardDescription>
+              <CardDescription>View your uploaded bank statements</CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Select value={bankFilter} onValueChange={setBankFilter}>
@@ -619,9 +667,9 @@ export default function StatementsPage() {
                 <SelectContent>
                   <SelectItem value="all">All Banks</SelectItem>
                   <SelectItem value="bmo">BMO</SelectItem>
+                  <SelectItem value="cibc">CIBC</SelectItem>
                   <SelectItem value="scotiabank">Scotiabank</SelectItem>
                   <SelectItem value="td">TD</SelectItem>
-                  <SelectItem value="cibc">CIBC</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={accountTypeFilter} onValueChange={setAccountTypeFilter}>
@@ -698,17 +746,15 @@ export default function StatementsPage() {
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
                   <TableHead className="text-muted-foreground">File Name</TableHead>
-                  <TableHead className="text-muted-foreground">Bank</TableHead>
+                  <TableHead className="text-muted-foreground">Bank Name</TableHead>
                   <TableHead className="text-muted-foreground">Account Type</TableHead>
                   <TableHead className="text-muted-foreground">Upload Date</TableHead>
-                  <TableHead className="text-muted-foreground">Transactions</TableHead>
-                  <TableHead className="text-right text-muted-foreground">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredStatements.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
                       No statements found matching your filters.
                     </TableCell>
                   </TableRow>
@@ -722,20 +768,7 @@ export default function StatementsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-foreground">
-                        <Select
-                          value={statement.bank}
-                          onValueChange={(value) => handleBankChange(statement.id, value)}
-                        >
-                          <SelectTrigger className="w-[100px] h-8 bg-background border-input hover:bg-muted/50 cursor-pointer transition-colors">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="BMO" className="cursor-pointer hover:bg-muted">BMO</SelectItem>
-                            <SelectItem value="Scotiabank" className="cursor-pointer hover:bg-muted">Scotiabank</SelectItem>
-                            <SelectItem value="TD" className="cursor-pointer hover:bg-muted">TD</SelectItem>
-                            <SelectItem value="CIBC" className="cursor-pointer hover:bg-muted">CIBC</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        {statement.bank}
                       </TableCell>
                       <TableCell className="text-foreground">
                         {statement.accountType}
@@ -747,17 +780,6 @@ export default function StatementsPage() {
                           year: 'numeric',
                         })}
                       </TableCell>
-                      <TableCell className="text-foreground">{statement.transactions}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => handleDeleteClick(statement)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -767,21 +789,157 @@ export default function StatementsPage() {
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+      {/* View Transactions Dialog */}
+      <Dialog open={viewTransactionsOpen} onOpenChange={(open) => !open && closeViewTransactions()}>
+        <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Delete Statement</DialogTitle>
+            <DialogTitle>
+              Transactions {viewTransactionsStatement ? `— ${viewTransactionsStatement.fileName}` : ''}
+            </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &quot;{statementToDelete?.fileName}&quot;? This action cannot be undone and will permanently remove the statement and its associated transactions.
+              {viewTransactionsStatement?.bank} {viewTransactionsStatement?.accountType}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex-1 overflow-auto">
+            {viewTransactionsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Skeleton className="h-48 w-full" />
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableHead className="text-muted-foreground">Date</TableHead>
+                      <TableHead className="text-muted-foreground">Description</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Amount</TableHead>
+                      <TableHead className="text-muted-foreground">Type</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {viewTransactionsList.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
+                          No transactions for this statement.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      viewTransactionsList.map((txn) => (
+                        <TableRow key={txn.id} className="hover:bg-muted/30">
+                          <TableCell className="text-muted-foreground">
+                            {new Date(txn.date).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}
+                          </TableCell>
+                          <TableCell className="font-medium text-foreground">
+                            {txn.description}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              'text-right font-medium tabular-nums',
+                              txn.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-destructive'
+                            )}
+                          >
+                            {txn.amount >= 0 ? '+' : ''}${Math.abs(txn.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="secondary"
+                              className={cn(
+                                'capitalize',
+                                txn.type === 'credit'
+                                  ? 'bg-green-500/15 text-green-600 dark:text-green-400'
+                                  : 'bg-red-500/15 text-red-600 dark:text-red-400'
+                              )}
+                            >
+                              {txn.type}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="bg-transparent">
-              Cancel
+            <Button variant="outline" onClick={closeViewTransactions} className="bg-transparent">
+              Close
             </Button>
-            <Button variant="destructive" onClick={confirmDelete}>
-              Delete
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transaction Review Dialog */}
+      <Dialog
+        open={transactionDialogOpen}
+        onOpenChange={(open) => {
+          setTransactionDialogOpen(open)
+          if (!open) handleCloseTransactionDialog()
+        }}
+      >
+        <DialogContent className="max-w-5xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Extracted Transactions</DialogTitle>
+            <DialogDescription>
+              Check your transactions before saving. Credits go to invoices, debits go to expenses.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto">
+            <div className="rounded-lg border border-border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <TableHead className="text-muted-foreground">Category</TableHead>
+                    <TableHead className="text-muted-foreground">Amount</TableHead>
+                    <TableHead className="text-muted-foreground">Date</TableHead>
+                    <TableHead className="text-muted-foreground">Transaction Type</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {extractedTransactions.map((txn, index) => (
+                    <TableRow key={index} className="hover:bg-muted/30">
+                      <TableCell className="font-medium text-foreground">
+                        {txn.category}
+                      </TableCell>
+                      <TableCell className="text-foreground">
+                        ${txn.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(txn.date).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            'capitalize font-medium',
+                            txn.type === 'credit'
+                              ? 'bg-green-500/15 text-green-600 dark:text-green-400'
+                              : 'bg-red-500/15 text-red-600 dark:text-red-400'
+                          )}
+                        >
+                          {txn.type}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              onClick={handleSaveTransactions}
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>
