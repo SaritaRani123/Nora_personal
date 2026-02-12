@@ -1,4 +1,8 @@
-// Service functions for expense-related data fetching
+/**
+ * Expense form lookup services: categories and clients from backend API;
+ * vendors, payment methods, currencies, tax rates, repeat frequencies are
+ * local reference data (no backend endpoints). Expense CRUD is in lib/services/expenses.
+ */
 import type {
   ExpenseCategory,
   Vendor,
@@ -7,24 +11,18 @@ import type {
   Currency,
   TaxRate,
   RepeatFrequency,
-  Expense,
-  ExpenseCreatePayload,
-  ExpenseUpdatePayload,
-  ListExpensesFilters,
 } from '@/types/expense'
-import { categories as mockCategories, contacts as mockContacts } from '@/lib/mock-data'
+import { apiFetch, extractArray } from '@/lib/api/http'
+import { listContacts, type Contact } from '@/lib/services/contacts'
 
-// Simulated API delay for realistic loading states
-const simulateDelay = (ms: number = 300) => new Promise(resolve => setTimeout(resolve, ms))
-
-// ============ Category Service ============
+// ============ Category Service (backend API) ============
 
 export async function listExpenseCategories(): Promise<ExpenseCategory[]> {
-  await simulateDelay()
-  return mockCategories
+  const body = await apiFetch('/categories')
+  return extractArray<ExpenseCategory>(body, 'categories')
 }
 
-// ============ Vendor Service ============
+// ============ Vendor Service (local reference data) ============
 
 const vendorsData: Vendor[] = [
   { id: 'mcdonalds', name: "McDonald's" },
@@ -42,36 +40,30 @@ const vendorsData: Vendor[] = [
 ]
 
 export async function listVendors(): Promise<Vendor[]> {
-  await simulateDelay()
-  return vendorsData
+  return Promise.resolve(vendorsData)
 }
 
 export function getVendorById(id: string): Vendor | undefined {
   return vendorsData.find(v => v.id === id)
 }
 
-// ============ Client Service ============
+// ============ Client Service (backend API: contacts) ============
 
 export async function listClients(): Promise<Client[]> {
-  await simulateDelay()
-  return mockContacts.map(c => ({
+  const contacts = await listContacts()
+  return contacts.map((c: Contact) => ({
     id: c.id,
     name: c.name,
     email: c.email,
   }))
 }
 
-export function getClientById(id: string): Client | undefined {
-  const contact = mockContacts.find(c => c.id === id)
-  if (!contact) return undefined
-  return {
-    id: contact.id,
-    name: contact.name,
-    email: contact.email,
-  }
+export function getClientById(id: string, contacts?: Client[]): Client | undefined {
+  if (contacts?.length) return contacts.find(c => c.id === id)
+  return undefined
 }
 
-// ============ Payment Method Service ============
+// ============ Payment Method Service (local reference data) ============
 
 const paymentMethodsData: PaymentMethod[] = [
   { id: 'credit', name: 'Credit Card' },
@@ -83,15 +75,14 @@ const paymentMethodsData: PaymentMethod[] = [
 ]
 
 export async function listPaymentMethods(): Promise<PaymentMethod[]> {
-  await simulateDelay()
-  return paymentMethodsData
+  return Promise.resolve(paymentMethodsData)
 }
 
 export function getPaymentMethodById(id: string): PaymentMethod | undefined {
   return paymentMethodsData.find(p => p.id === id)
 }
 
-// ============ Currency Service ============
+// ============ Currency Service (local reference data) ============
 
 const currenciesData: Currency[] = [
   { code: 'CAD', name: 'Canadian Dollar', symbol: '$' },
@@ -101,15 +92,14 @@ const currenciesData: Currency[] = [
 ]
 
 export async function listCurrencies(): Promise<Currency[]> {
-  await simulateDelay()
-  return currenciesData
+  return Promise.resolve(currenciesData)
 }
 
 export function getCurrencyByCode(code: string): Currency | undefined {
   return currenciesData.find(c => c.code === code)
 }
 
-// ============ Tax Rate Service ============
+// ============ Tax Rate Service (local reference data) ============
 
 const taxRatesData: TaxRate[] = [
   { id: 'none', name: 'No Tax', rate: 0 },
@@ -121,15 +111,14 @@ const taxRatesData: TaxRate[] = [
 ]
 
 export async function listTaxRates(): Promise<TaxRate[]> {
-  await simulateDelay()
-  return taxRatesData
+  return Promise.resolve(taxRatesData)
 }
 
 export function getTaxRateById(id: string): TaxRate | undefined {
   return taxRatesData.find(t => t.id === id)
 }
 
-// ============ Repeat Frequency Service ============
+// ============ Repeat Frequency Service (local reference data) ============
 
 const repeatFrequenciesData: RepeatFrequency[] = [
   { id: 'weekly', name: 'Weekly' },
@@ -140,83 +129,5 @@ const repeatFrequenciesData: RepeatFrequency[] = [
 ]
 
 export async function listRepeatFrequencies(): Promise<RepeatFrequency[]> {
-  await simulateDelay()
-  return repeatFrequenciesData
-}
-
-// ============ Expense CRUD Service ============
-
-// In-memory store for expenses (in a real app, this would be a database)
-let expensesStore: Expense[] = []
-
-export async function createExpense(payload: ExpenseCreatePayload): Promise<Expense> {
-  await simulateDelay(500)
-  
-  const newExpense: Expense = {
-    id: `exp-${Date.now()}`,
-    ...payload,
-    source: payload.source || 'manual',
-  }
-  
-  expensesStore = [newExpense, ...expensesStore]
-  return newExpense
-}
-
-export async function updateExpense(id: string, payload: ExpenseUpdatePayload): Promise<Expense> {
-  await simulateDelay(500)
-  
-  const index = expensesStore.findIndex(e => e.id === id)
-  if (index === -1) {
-    throw new Error(`Expense with id ${id} not found`)
-  }
-  
-  const updatedExpense: Expense = {
-    ...expensesStore[index],
-    ...payload,
-  }
-  
-  expensesStore[index] = updatedExpense
-  return updatedExpense
-}
-
-export async function deleteExpense(id: string): Promise<void> {
-  await simulateDelay(300)
-  expensesStore = expensesStore.filter(e => e.id !== id)
-}
-
-export async function getExpense(id: string): Promise<Expense | null> {
-  await simulateDelay()
-  return expensesStore.find(e => e.id === id) || null
-}
-
-// List expenses with optional filters (type imported from @/types/expense)
-export async function listExpenses(filters?: ListExpensesFilters): Promise<Expense[]> {
-  await simulateDelay()
-  
-  if (!filters) {
-    return expensesStore
-  }
-
-  return expensesStore.filter(expense => {
-    // Date range filter (YYYY-MM-DD string comparison works correctly)
-    if (filters.from && expense.date < filters.from) return false
-    if (filters.to && expense.date > filters.to) return false
-    
-    // Category filter
-    if (filters.categoryId && expense.categoryId !== filters.categoryId) return false
-    
-    // Vendor filter
-    if (filters.vendorId && expense.vendorId !== filters.vendorId) return false
-    
-    // Client filter
-    if (filters.clientId && expense.clientId !== filters.clientId) return false
-    
-    // Payment method filter
-    if (filters.paymentMethodId && expense.paymentMethodId !== filters.paymentMethodId) return false
-    
-    // Paid status filter
-    if (filters.isPaid !== undefined && expense.isPaid !== filters.isPaid) return false
-    
-    return true
-  })
+  return Promise.resolve(repeatFrequenciesData)
 }

@@ -1,4 +1,5 @@
 import { apiFetch, extractArray } from '@/lib/api/http'
+import { getApiBaseUrl } from '@/lib/config/api'
 
 export interface StatementTransaction {
   id: string
@@ -44,13 +45,11 @@ export async function getStatementsWithStats(): Promise<{ statements: Statement[
   return { statements, stats }
 }
 
-const getBaseUrl = () => (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '')
-
 export async function uploadStatement(
   file: File,
   options?: { bank?: string; accountType?: string }
 ): Promise<Statement[]> {
-  const url = `${getBaseUrl()}/statements/upload`
+  const url = `${getApiBaseUrl()}/statements/upload`
   const formData = new FormData()
   formData.append('file', file)
   if (options?.bank) formData.append('bank', options.bank)

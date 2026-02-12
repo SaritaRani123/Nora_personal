@@ -12,12 +12,8 @@ import { fetchPayableSummary, type BucketData, type PayableSummaryResponse } fro
 // ============================================================
 // Payable & Owing Summary Component
 // ============================================================
-// This component fetches data from /api/payable-summary which
-// uses the API service layer in lib/api/payable-summary.ts
-// 
-// To switch from mock data to AWS:
-// 1. Update lib/api/payable-summary.ts with your AWS endpoint
-// 2. No changes needed in this component
+// Fetches data from backend via lib/services/payable-summary
+// (base URL configured in lib/config/api.ts, default http://localhost:8080)
 // ============================================================
 
 function formatCurrency(amount: number): string {

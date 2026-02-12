@@ -1,7 +1,6 @@
 'use client'
 
 import { create } from 'zustand'
-import { expenses as initialExpenses, invoices as initialInvoices, contacts as initialContacts, income as initialIncome } from './mock-data'
 
 // Types
 export interface Expense {
@@ -98,20 +97,12 @@ interface DataStore {
   markWorkDoneAsInvoiced: (ids: string[], invoiceId: string) => void
 }
 
-// Additional expenses for initial data
-const additionalExpenses: Expense[] = [
-  { id: '9', date: '2025-01-05', description: 'Business Insurance', amount: 450.00, category: 'insurance', paymentMethod: 'Bank Transfer', aiSuggested: true, confidence: 96, source: 'import' },
-  { id: '10', date: '2025-01-04', description: 'Employee Training', amount: 299.00, category: 'education', paymentMethod: 'Credit Card', aiSuggested: true, confidence: 88, source: 'import' },
-  { id: '11', date: '2025-01-03', description: 'Cloud Hosting - AWS', amount: 189.50, category: 'software', paymentMethod: 'Credit Card', aiSuggested: true, confidence: 98, source: 'import' },
-  { id: '12', date: '2025-01-02', description: 'Office Cleaning Service', amount: 150.00, category: 'utilities', paymentMethod: 'Bank Transfer', aiSuggested: true, confidence: 91, source: 'import' },
-]
-
 export const useDataStore = create<DataStore>((set, get) => ({
-  // Initialize with mock data
-  expenses: [...initialExpenses.map(e => ({ ...e, source: 'import' as const })), ...additionalExpenses],
-  invoices: initialInvoices.map(i => ({ ...i, source: 'manual' as const })),
-  income: [...initialIncome],
-  contacts: [...initialContacts],
+  // Initial state: empty; data is loaded from backend via services
+  expenses: [],
+  invoices: [],
+  income: [],
+  contacts: [],
   workDoneEntries: [],
 
   // Expense actions

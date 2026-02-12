@@ -1,4 +1,5 @@
 import { ensureArray } from '@/lib/api/arrays'
+import { getApiBaseUrl } from '@/lib/config/api'
 
 export class HttpError extends Error {
   status: number
@@ -10,12 +11,6 @@ export class HttpError extends Error {
     this.status = status
     this.body = body
   }
-}
-
-function getApiBaseUrl(): string {
-  // Client-side: NEXT_PUBLIC_ is required
-  // Server-side: still available in Next for public envs
-  return (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '')
 }
 
 export type ApiEnvelope<T> =

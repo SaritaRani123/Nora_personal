@@ -44,10 +44,14 @@ See `API.md` for the complete endpoint list and examples.
 ## Folder structure (high level)
 
 - **`app/`**: Next.js routes (App Router)
-  - **`(dashboard)/`**: dashboard pages (URLs reflect feature routes like `/expenses`, `/invoices`, etc.)
+  - **`(auth)/`**: sign-in, sign-up
+  - **`(dashboard)/`**: dashboard pages (e.g. `/expenses`, `/invoices`, `/contacts`, `/reports`)
 - **`components/`**: reusable UI and feature components
   - **`components/ui/`**: shared UI primitives
-- **`lib/api/`**: API client helpers (`apiFetch`, array extraction)
-- **`lib/services/`**: backend-facing service modules used by pages/components
+- **`lib/config/`**: app configuration (e.g. API base URL)
+- **`lib/api/`**: centralized API client (`apiFetch`, array extraction); no hardcoded URLs
+- **`lib/services/`**: backend-facing service modules (all use `lib/api` and `lib/config`)
+- **`hooks/`**: shared React hooks
 - **`types/`**: shared TypeScript types
+- **`public/`**: static assets
 
