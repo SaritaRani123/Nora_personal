@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useRef, useCallback, Suspense } from 'react'
+import React, { useState, useRef, useCallback, Suspense, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from 'next/navigation'
 import {
@@ -70,7 +70,9 @@ import { Switch } from '@/components/ui/switch'
 import useSWR, { mutate } from 'swr'
 import { listContacts, createContact, type Contact as ApiContact } from '@/lib/services/contacts'
 import { listInvoices, createInvoice, updateInvoice, type Invoice } from '@/lib/services/invoices'
+import { HttpError } from '@/lib/api/http'
 import { generateInvoicePDFFromPayload, type InvoicePDFPayload } from '@/lib/invoices/generateInvoicePDF'
+import InvoicePreview from './components/InvoicePreview'
 
 // Helper function for case-insensitive alphabetical sorting
 const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
@@ -158,11 +160,6 @@ const stateConfig = {
   overdue: { label: 'Overdue', color: 'bg-red-100 text-red-700' },
 }
 
-const logoSizeClasses = {
-  small: 'h-10',
-  medium: 'h-16',
-  large: 'h-24',
-}
 
 const logoSizeValues = {
   small: 0,
@@ -308,18 +305,21 @@ function CreateInvoiceContent() {
     }
     // Auto-fill line items from work done entries
     if (fromWorkEntries.length > 0) {
-      return fromWorkEntries.map((entry, idx) => ({
-        id: String(idx + 1),
-        itemType: 'hourly' as ItemType,
-        item: entry.description || 'Work Done',
-        quantity: 1,
-        unit: 'hrs',
-        hours: Math.floor(entry.hours),
-        minutes: Math.round((entry.hours % 1) * 60),
-        price: entry.rate,
-        taxId: null,
-        description: `${entry.date} - ${entry.contact || 'Work'}`,
-      }))
+      return fromWorkEntries.map((entry, idx) => {
+        const hrs = entry.hours ?? 0
+        return {
+          id: String(idx + 1),
+          itemType: 'hourly' as ItemType,
+          item: entry.description || 'Work Done',
+          quantity: 1,
+          unit: 'hrs',
+          hours: Math.floor(hrs),
+          minutes: Math.round((hrs % 1) * 60),
+          price: entry.rate ?? 0,
+          taxId: null,
+          description: entry.contact || 'Work',
+        }
+      })
     }
     return [
       { id: '1', itemType: 'item', item: '', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 0, taxId: null, description: '' },
@@ -328,6 +328,63 @@ function CreateInvoiceContent() {
 
   // Unit options for quantity
   const unitOptions = ['pcs', 'kg', 'lbs', 'units', 'boxes', 'hrs', 'days']
+
+  // Load full invoice from sessionStorage when editing (set by list page handleEdit)
+  const editLoadedRef = useRef(false)
+  useEffect(() => {
+    if (!isEditMode || !editInvoiceId || editLoadedRef.current) return
+    try {
+      const raw = sessionStorage.getItem('invoiceToEdit')
+      if (!raw) return
+      const inv: Invoice = JSON.parse(raw)
+      if (inv.id !== editInvoiceId) return
+      editLoadedRef.current = true
+      sessionStorage.removeItem('invoiceToEdit')
+
+      if (inv.template) setSelectedTemplate(inv.template as InvoiceTemplate)
+      if (inv.colorPalette) {
+        const match = presetPalettes.find(
+          (p) => p.header === inv.colorPalette?.header && p.accent === inv.colorPalette?.accent
+        )
+        if (match) setColorPalette(match)
+        else setCustomColors(inv.colorPalette)
+      }
+      if (inv.invoiceCurrency) setInvoiceCurrency(inv.invoiceCurrency)
+      setSelectedContact({
+        id: inv.id,
+        name: inv.client,
+        email: inv.email,
+        phone: '',
+        address: '',
+      })
+      setInvoiceDetails((prev) => ({
+        ...prev,
+        invoiceNumber: inv.id,
+        invoiceDate: inv.issueDate,
+        dueDate: inv.dueDate,
+      }))
+      const status = inv.status
+      if (status === 'paid' || status === 'overdue' || status === 'draft') setInvoiceState(status)
+      else if (status === 'pending') setInvoiceState('sent')
+
+      if (inv.lineItems && inv.lineItems.length > 0) {
+        setLineItems(
+          inv.lineItems.map((li, idx) => ({
+            id: String(idx + 1),
+            itemType: (li.itemType ?? 'item') as ItemType,
+            item: li.item ?? '',
+            quantity: li.quantity ?? 1,
+            unit: li.unit ?? 'pcs',
+            hours: li.hours ?? 0,
+            minutes: li.minutes ?? 0,
+            price: li.price ?? 0,
+            taxId: li.taxId ?? null,
+            description: li.description ?? '',
+          }))
+        )
+      }
+    } catch (_) { /* ignore */ }
+  }, [isEditMode, editInvoiceId])
 
   // Discount
   const [discount, setDiscount] = useState(0)
@@ -371,8 +428,8 @@ function CreateInvoiceContent() {
     id: contact.id,
     name: contact.name,
     email: contact.email,
-    phone: contact.phone,
-    address: contact.address,
+    phone: contact.phone ?? '',
+    address: contact.address ?? '',
   }))
 
   // Calculate line item amount based on type
@@ -833,8 +890,10 @@ function CreateInvoiceContent() {
       paidDate: null,
       template: selectedTemplate,
       colorPalette: activeColors,
+      invoiceCurrency,
+      lineItems,
     }
-    
+
     await createInvoice(newInvoiceData)
     await mutate('invoices')
     setIsSending(false)
@@ -848,28 +907,57 @@ function CreateInvoiceContent() {
   }
 
   // Save invoice handler (saves with current status and redirects to invoices page)
-  const handleSaveInvoice = async () => {
+  // Optional overrides for Record Payment: status 'paid' and paidDate
+  const handleSaveInvoice = async (overrides?: { status?: 'paid' | 'pending' | 'overdue' | 'draft'; paidDate?: string | null }) => {
+    const status = overrides?.status ?? mapInvoiceStateToStatus(invoiceState)
+    const paidDate = overrides?.paidDate ?? (status === 'paid' ? new Date().toISOString().split('T')[0] : null)
+
     const invoiceData = {
       id: isEditMode && editInvoiceId ? editInvoiceId : invoiceDetails.invoiceNumber,
       client: selectedContact?.name || 'Unknown Contact',
       email: selectedContact?.email || '',
       amount: total,
-      status: mapInvoiceStateToStatus(invoiceState),
+      status,
       issueDate: invoiceDetails.invoiceDate,
       dueDate: invoiceDetails.dueDate || invoiceDetails.invoiceDate,
-      paidDate: invoiceState === 'paid' ? new Date().toISOString().split('T')[0] : null,
+      paidDate,
       template: selectedTemplate,
       colorPalette: activeColors,
+      invoiceCurrency,
+      lineItems,
     }
-    
-    if (isEditMode && editInvoiceId) {
-      await updateInvoice(editInvoiceId, invoiceData)
-      await mutate('invoices')
-    } else {
-      await createInvoice(invoiceData)
-      await mutate('invoices')
+
+    try {
+      if (isEditMode && editInvoiceId) {
+        try {
+          await updateInvoice(editInvoiceId, invoiceData)
+        } catch (err) {
+          // If 404 (invoice not found, e.g. backend restarted), fall back to create
+          if (err instanceof HttpError && err.status === 404) {
+            const { id: _id, ...createPayload } = invoiceData
+            await createInvoice(createPayload)
+          } else {
+            throw err
+          }
+        }
+        await mutate('invoices')
+      } else {
+        await createInvoice(invoiceData)
+        await mutate('invoices')
+      }
+      router.push('/invoices')
+    } catch (e) {
+      console.error('Failed to save invoice:', e)
+      throw e
     }
-    router.push('/invoices')
+  }
+
+  // Record payment: persist paid status immediately and redirect
+  const handleRecordPayment = async () => {
+    setInvoiceState('paid')
+    setIsRecordPaymentOpen(false)
+    const paidDateVal = paymentDate || new Date().toISOString().split('T')[0]
+    await handleSaveInvoice({ status: 'paid', paidDate: paidDateVal })
   }
 
   // Duplicate invoice handler
@@ -947,15 +1035,6 @@ function CreateInvoiceContent() {
     }
   }
 
-  // Logo component with positioning and size
-  const renderLogo = (className?: string) => {
-    const sizeClass = logoSizeClasses[logoSize]
-    if (!businessDetails.logo) {
-      return <div className={`text-2xl font-bold ${className}`}>{businessDetails.name}</div>
-    }
-    return <img src={businessDetails.logo || "/placeholder.svg"} alt="Logo" className={`${sizeClass} w-auto object-contain ${className}`} crossOrigin="anonymous" />
-  }
-
   // Step indicator
   const renderStepIndicator = () => (
     <div className="flex items-center justify-center gap-2 mb-6">
@@ -995,326 +1074,34 @@ function CreateInvoiceContent() {
     </div>
   )
 
-  // Get logo alignment classes based on position
-  const getLogoAlignmentClasses = () => {
-    switch (logoPosition) {
-      case 'center':
-        return 'flex-col items-center text-center'
-      case 'right':
-        return 'flex-row-reverse'
-      default:
-        return ''
-    }
+  // Invoice preview props for InvoicePreview component
+  const invoicePreviewProps = {
+    businessDetails,
+    activeColors,
+    logoPosition,
+    logoSize,
+    selectedTemplate,
+    invoiceDetails,
+    selectedContact,
+    lineItems,
+    taxRates,
+    formatDate,
+    calculateLineItemAmount,
+    getTaxBreakdown,
+    subtotal,
+    discount,
+    discountType,
+    discountAmount,
+    total,
+    notes,
+    invoiceCurrency,
+    currencySymbol,
   }
 
-  // Classic Template
-  const renderClassicTemplate = () => {
-    const taxBreakdown = getTaxBreakdown()
-    return (
-      <div ref={invoicePreviewRef} className="bg-white p-8 text-gray-900 shadow-lg text-sm min-h-[700px] flex flex-col">
-        {/* Header */}
-        <div className={`flex pb-6 border-b-2 ${getLogoAlignmentClasses()} ${logoPosition !== 'center' ? 'justify-between' : 'gap-4'}`} style={{ borderColor: activeColors.header }}>
-          <div className={logoPosition === 'center' ? 'text-center' : logoPosition === 'right' ? 'text-right' : ''}>
-            {renderLogo()}
-            <p className="mt-2 text-xs text-gray-600 whitespace-pre-line">{businessDetails.address}</p>
-          </div>
-          <div className={logoPosition === 'center' ? 'text-center' : logoPosition === 'right' ? 'text-left' : 'text-right'}>
-            <h1 className="text-3xl font-bold" style={{ color: activeColors.header }}>{businessDetails.invoiceTitle}</h1>
-            <div className="mt-2 space-y-1">
-              <p className="text-xs"><span className="font-medium">Invoice #:</span> {invoiceDetails.invoiceNumber}</p>
-              <p className="text-xs"><span className="font-medium">Date:</span> {formatDate(invoiceDetails.invoiceDate)}</p>
-              {invoiceDetails.dueDate && <p className="text-xs"><span className="font-medium">Due:</span> {formatDate(invoiceDetails.dueDate)}</p>}
-              <p className="text-xs"><span className="font-medium">Currency:</span> {invoiceCurrency}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Bill To */}
-        <div className="py-6">
-          <h3 className="text-xs font-bold uppercase mb-2" style={{ color: activeColors.header }}>Bill To</h3>
-          {selectedContact ? (
-            <div>
-              <p className="font-semibold">{selectedContact.name}</p>
-              <p className="text-xs text-gray-600">{selectedContact.email}</p>
-              {selectedContact.address && <p className="text-xs text-gray-600 mt-1">{selectedContact.address}</p>}
-            </div>
-          ) : (
-            <p className="text-xs text-gray-400 italic">No contact selected</p>
-          )}
-        </div>
-
-        {/* Items Table */}
-        <table className="w-full">
-          <thead>
-            <tr style={{ backgroundColor: activeColors.tableHeader }}>
-              <th className="py-2 px-3 text-left text-xs font-bold text-white">Description</th>
-              <th className="py-2 px-2 text-center text-xs font-bold text-white">Qty/Hours</th>
-              <th className="py-2 px-2 text-right text-xs font-bold text-white">Price</th>
-              <th className="py-2 px-2 text-right text-xs font-bold text-white">Tax</th>
-              <th className="py-2 px-3 text-right text-xs font-bold text-white">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lineItems.map((item, idx) => {
-              const tax = item.taxId ? taxRates.find((t) => t.id === item.taxId) : null
-              const amount = calculateLineItemAmount(item)
-              const qtyDisplay = item.itemType === 'hourly' 
-                ? `${item.hours}h ${item.minutes}m` 
-                : `${item.quantity} ${item.unit}`
-              return (
-                <tr key={item.id} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                  <td className="py-2 px-3 text-xs">
-                    <div>{item.item || 'Item'}</div>
-                    {item.description && <div className="text-gray-500 text-[10px] mt-0.5">{item.description}</div>}
-                  </td>
-                  <td className="py-2 px-2 text-center text-xs">{qtyDisplay}</td>
-                  <td className="py-2 px-2 text-right text-xs">{currencySymbol}{item.price.toFixed(2)}{item.itemType === 'hourly' ? '/hr' : ''}</td>
-                  <td className="py-2 px-2 text-right text-xs">{tax ? `${tax.name}` : '-'}</td>
-                  <td className="py-2 px-3 text-right text-xs font-medium">{currencySymbol}{amount.toFixed(2)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-
-        {/* Totals */}
-        <div className="mt-6 flex justify-end">
-          <div className="w-56 space-y-1">
-            <div className="flex justify-between text-xs"><span>Subtotal</span><span>{currencySymbol}{subtotal.toFixed(2)}</span></div>
-            {discount > 0 && (
-              <div className="flex justify-between text-xs text-green-600">
-                <span>Discount {discountType === 'percentage' ? `(${discount}%)` : ''}</span>
-                <span>-{currencySymbol}{discountAmount.toFixed(2)}</span>
-              </div>
-            )}
-            {taxBreakdown.map((tax, idx) => <div key={idx} className="flex justify-between text-xs"><span>{tax.name}</span><span>{currencySymbol}{tax.amount.toFixed(2)}</span></div>)}
-            <div className="flex justify-between border-t pt-2 font-bold" style={{ color: activeColors.header }}><span>Total ({invoiceCurrency})</span><span>{currencySymbol}{total.toFixed(2)}</span></div>
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div className="mt-6 pt-4 border-t">
-          {notes && <div className="mb-2"><h3 className="text-xs font-bold mb-1">Notes</h3><p className="text-xs text-gray-600">{notes}</p></div>}
-          <p className="text-xs text-gray-500">{businessDetails.summary}</p>
-        </div>
-
-        {/* Thank You - pushed to bottom */}
-        <div className="mt-auto pt-6">
-          <p className="text-center text-lg italic" style={{ fontFamily: 'Georgia, serif', color: activeColors.header }}>Thank you</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Modern Template
-  const renderModernTemplate = () => {
-    const taxBreakdown = getTaxBreakdown()
-    return (
-      <div ref={invoicePreviewRef} className="bg-white p-8 text-gray-900 shadow-lg text-sm min-h-[700px] flex flex-col">
-        <div className="h-1 w-full mb-6" style={{ background: `linear-gradient(to right, ${activeColors.accent}40, ${activeColors.accent}, ${activeColors.accent}40)` }} />
-        
-        <div className={`flex pb-6 ${getLogoAlignmentClasses()} ${logoPosition !== 'center' ? 'justify-between' : 'gap-4'}`}>
-          <div className={logoPosition === 'center' ? 'text-center' : logoPosition === 'right' ? 'text-right' : ''}>
-            {renderLogo()}
-            <p className="mt-2 text-xs text-gray-600 whitespace-pre-line">{businessDetails.address}</p>
-          </div>
-          <div className={logoPosition === 'center' ? 'text-center' : logoPosition === 'right' ? 'text-left' : 'text-right'}>
-            <h1 className="text-3xl font-bold tracking-tight" style={{ color: activeColors.header }}>{businessDetails.invoiceTitle}</h1>
-            <div className="mt-3 space-y-0.5">
-              <p className="text-xs"><span className="font-medium">Invoice #:</span> {invoiceDetails.invoiceNumber}</p>
-              <p className="text-xs"><span className="font-medium">Date:</span> {formatDate(invoiceDetails.invoiceDate)}</p>
-              {invoiceDetails.dueDate && <p className="text-xs"><span className="font-medium">Due:</span> {formatDate(invoiceDetails.dueDate)}</p>}
-              <p className="text-xs"><span className="font-medium">Currency:</span> {invoiceCurrency}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="border-t-2 border-gray-200 my-4" />
-
-        <div className="rounded-lg p-3 mb-4" style={{ backgroundColor: `${activeColors.accent}10` }}>
-          <h3 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: activeColors.accent }}>Bill To</h3>
-          {selectedContact ? (
-            <div>
-              <p className="font-semibold">{selectedContact.name}</p>
-              <p className="text-xs text-gray-600">{selectedContact.email}</p>
-              {selectedContact.address && <p className="text-xs text-gray-600 mt-1">{selectedContact.address}</p>}
-            </div>
-          ) : (
-            <p className="text-xs text-gray-400 italic">No contact selected</p>
-          )}
-        </div>
-
-        <table className="w-full">
-          <thead>
-            <tr style={{ backgroundColor: activeColors.tableHeader }}>
-              <th className="py-2 px-3 text-left text-xs font-bold text-white rounded-l">Description</th>
-              <th className="py-2 px-2 text-center text-xs font-bold text-white">Qty/Hours</th>
-              <th className="py-2 px-2 text-right text-xs font-bold text-white">Price</th>
-              <th className="py-2 px-2 text-right text-xs font-bold text-white">Tax</th>
-              <th className="py-2 px-3 text-right text-xs font-bold text-white rounded-r">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lineItems.map((item, idx) => {
-              const tax = item.taxId ? taxRates.find((t) => t.id === item.taxId) : null
-              const amount = calculateLineItemAmount(item)
-              const qtyDisplay = item.itemType === 'hourly' 
-                ? `${item.hours}h ${item.minutes}m` 
-                : `${item.quantity} ${item.unit}`
-              return (
-                <tr key={item.id} className={`border-b border-gray-200 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                  <td className="py-2 px-3 text-xs font-medium">
-                    <div>{item.item || 'Item'}</div>
-                    {item.description && <div className="text-gray-500 text-[10px] mt-0.5 font-normal">{item.description}</div>}
-                  </td>
-                  <td className="py-2 px-2 text-center text-xs">{qtyDisplay}</td>
-                  <td className="py-2 px-2 text-right text-xs">{currencySymbol}{item.price.toFixed(2)}{item.itemType === 'hourly' ? '/hr' : ''}</td>
-                  <td className="py-2 px-2 text-right text-xs">{tax ? `${tax.name} (${tax.rate}%)` : '-'}</td>
-                  <td className="py-2 px-3 text-right text-xs font-semibold">{currencySymbol}{amount.toFixed(2)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-
-        <div className="mt-6 flex justify-end">
-          <div className="w-64 space-y-1">
-            <div className="flex justify-between text-xs"><span className="text-gray-600">Subtotal</span><span>{currencySymbol}{subtotal.toFixed(2)}</span></div>
-            {discount > 0 && (
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-600">Discount {discountType === 'percentage' ? `(${discount}%)` : ''}</span>
-                <span className="text-green-600">-{currencySymbol}{discountAmount.toFixed(2)}</span>
-              </div>
-            )}
-            {taxBreakdown.map((tax, idx) => <div key={idx} className="flex justify-between text-xs"><span className="text-gray-600">{tax.name}</span><span>{currencySymbol}{tax.amount.toFixed(2)}</span></div>)}
-            <div className="border-t border-gray-300 pt-2 mt-2">
-              <div className="flex justify-between"><span className="font-bold">Total ({invoiceCurrency})</span><span className="font-bold text-lg" style={{ color: activeColors.header }}>{currencySymbol}{total.toFixed(2)}</span></div>
-            </div>
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div className="mt-8 pt-4 border-t border-gray-200">
-          {notes && <div className="mb-2"><h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Notes / Terms</h3><p className="text-xs text-gray-600 whitespace-pre-line">{notes}</p></div>}
-          <p className="text-xs text-gray-500">{businessDetails.summary}</p>
-        </div>
-
-        {/* Thank You - pushed to bottom */}
-        <div className="mt-auto pt-6">
-          <p className="text-center text-lg italic" style={{ fontFamily: 'Georgia, serif', color: activeColors.header }}>Thank you</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Formal Template
-  const renderFormalTemplate = () => {
-    const taxBreakdown = getTaxBreakdown()
-    return (
-      <div ref={invoicePreviewRef} className="bg-white p-8 text-gray-900 shadow-lg text-sm min-h-[700px] flex flex-col border-4" style={{ borderColor: activeColors.header }}>
-        <div className={`flex pb-6 ${getLogoAlignmentClasses()} ${logoPosition !== 'center' ? 'justify-between items-start' : 'gap-4'}`}>
-          <div className={logoPosition === 'center' ? 'text-center' : logoPosition === 'right' ? 'text-right' : ''}>
-            {renderLogo()}
-            <p className="mt-2 text-xs text-gray-600 whitespace-pre-line">{businessDetails.address}</p>
-          </div>
-          <div className={`p-4 rounded ${logoPosition === 'center' ? 'text-center' : logoPosition === 'right' ? 'text-left' : 'text-right'}`} style={{ backgroundColor: activeColors.header }}>
-            <h1 className="text-2xl font-bold text-white">{businessDetails.invoiceTitle}</h1>
-            <div className="mt-2 space-y-0.5 text-white/90">
-              <p className="text-xs">#{invoiceDetails.invoiceNumber}</p>
-              <p className="text-xs">{formatDate(invoiceDetails.invoiceDate)}</p>
-              <p className="text-xs">{invoiceCurrency}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-6 py-6 border-y" style={{ borderColor: activeColors.header }}>
-          <div>
-            <h3 className="text-xs font-bold uppercase mb-2" style={{ color: activeColors.header }}>Bill To</h3>
-            {selectedContact ? (
-              <div>
-                <p className="font-semibold">{selectedContact.name}</p>
-                <p className="text-xs text-gray-600">{selectedContact.email}</p>
-                {selectedContact.address && <p className="text-xs text-gray-600 mt-1">{selectedContact.address}</p>}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400 italic">No contact selected</p>
-            )}
-          </div>
-          <div className="text-right">
-            <h3 className="text-xs font-bold uppercase mb-2" style={{ color: activeColors.header }}>Payment Due</h3>
-            <p className="font-semibold">{formatDate(invoiceDetails.dueDate) || 'Upon Receipt'}</p>
-            <p className="text-2xl font-bold mt-2" style={{ color: activeColors.header }}>{currencySymbol}{total.toFixed(2)}</p>
-          </div>
-        </div>
-
-        <table className="w-full mt-6">
-          <thead>
-            <tr className="border-b-2" style={{ borderColor: activeColors.header }}>
-              <th className="py-2 text-left text-xs font-bold uppercase" style={{ color: activeColors.header }}>Description</th>
-              <th className="py-2 text-center text-xs font-bold uppercase" style={{ color: activeColors.header }}>Qty/Hours</th>
-              <th className="py-2 text-right text-xs font-bold uppercase" style={{ color: activeColors.header }}>Price</th>
-              <th className="py-2 text-right text-xs font-bold uppercase" style={{ color: activeColors.header }}>Tax</th>
-              <th className="py-2 text-right text-xs font-bold uppercase" style={{ color: activeColors.header }}>Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lineItems.map((item) => {
-              const tax = item.taxId ? taxRates.find((t) => t.id === item.taxId) : null
-              const amount = calculateLineItemAmount(item)
-              const qtyDisplay = item.itemType === 'hourly' 
-                ? `${item.hours}h ${item.minutes}m` 
-                : `${item.quantity} ${item.unit}`
-              return (
-                <tr key={item.id} className="border-b border-gray-200">
-                  <td className="py-3 text-xs">
-                    <div>{item.item || 'Item'}</div>
-                    {item.description && <div className="text-gray-500 text-[10px] mt-0.5">{item.description}</div>}
-                  </td>
-                  <td className="py-3 text-center text-xs">{qtyDisplay}</td>
-                  <td className="py-3 text-right text-xs">{currencySymbol}{item.price.toFixed(2)}{item.itemType === 'hourly' ? '/hr' : ''}</td>
-                  <td className="py-3 text-right text-xs">{tax ? `${tax.name}` : '-'}</td>
-                  <td className="py-3 text-right text-xs font-medium">{currencySymbol}{amount.toFixed(2)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-
-        <div className="mt-6 flex justify-end">
-          <div className="w-56 space-y-1">
-            <div className="flex justify-between text-xs"><span>Subtotal</span><span>{currencySymbol}{subtotal.toFixed(2)}</span></div>
-            {discount > 0 && (
-              <div className="flex justify-between text-xs text-green-600">
-                <span>Discount {discountType === 'percentage' ? `(${discount}%)` : ''}</span>
-                <span>-{currencySymbol}{discountAmount.toFixed(2)}</span>
-              </div>
-            )}
-            {taxBreakdown.map((tax, idx) => <div key={idx} className="flex justify-between text-xs"><span>{tax.name}</span><span>{currencySymbol}{tax.amount.toFixed(2)}</span></div>)}
-            <div className="flex justify-between border-t-2 pt-2 font-bold text-lg" style={{ borderColor: activeColors.header, color: activeColors.header }}><span>Total Due</span><span>{currencySymbol}{total.toFixed(2)}</span></div>
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div className="mt-6 pt-4 border-t" style={{ borderColor: activeColors.header }}>
-          {notes && <div className="mb-2"><h3 className="text-xs font-bold mb-1" style={{ color: activeColors.header }}>Notes</h3><p className="text-xs text-gray-600">{notes}</p></div>}
-          <p className="text-xs text-gray-500">{businessDetails.summary}</p>
-        </div>
-
-        {/* Thank You - pushed to bottom */}
-        <div className="mt-auto pt-6">
-          <p className="text-center text-lg italic" style={{ fontFamily: 'Georgia, serif', color: activeColors.header }}>Thank you</p>
-        </div>
-      </div>
-    )
-  }
-
-  const renderCurrentTemplate = () => {
-    switch (selectedTemplate) {
-      case 'classic': return renderClassicTemplate()
-      case 'formal': return renderFormalTemplate()
-      default: return renderModernTemplate()
-    }
-  }
+  // Render current template via InvoicePreview component
+  const renderCurrentTemplate = () => (
+    <InvoicePreview ref={invoicePreviewRef} {...invoicePreviewProps} />
+  )
 
   // Template thumbnails for selection
   const renderTemplateThumbnail = (template: InvoiceTemplate, isSelected: boolean) => {
@@ -2278,7 +2065,7 @@ function CreateInvoiceContent() {
           </DropdownMenu>
           
           {/* Save Invoice */}
-          <Button size="sm" onClick={handleSaveInvoice}>
+          <Button size="sm" onClick={() => void handleSaveInvoice()}>
             <Check className="h-4 w-4 mr-1" />
             Save Invoice
           </Button>
@@ -2525,7 +2312,7 @@ function CreateInvoiceContent() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsRecordPaymentOpen(false)} className="bg-transparent">Cancel</Button>
-            <Button onClick={() => { setInvoiceState('paid'); setIsRecordPaymentOpen(false) }}>
+            <Button onClick={() => void handleRecordPayment()}>
               Record Payment
             </Button>
           </DialogFooter>

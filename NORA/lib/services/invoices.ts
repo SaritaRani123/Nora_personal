@@ -1,5 +1,18 @@
 import { apiFetch, extractArray } from '@/lib/api/http'
 
+export interface InvoiceLineItem {
+  id?: string
+  itemType: 'item' | 'hourly'
+  item: string
+  quantity: number
+  unit: string
+  hours: number
+  minutes: number
+  price: number
+  taxId: string | null
+  description: string
+}
+
 export interface Invoice {
   id: string
   client: string
@@ -17,6 +30,8 @@ export interface Invoice {
     accent: string
     tableHeader: string
   }
+  invoiceCurrency?: string
+  lineItems?: InvoiceLineItem[]
 }
 
 export type CreateInvoicePayload = Omit<Invoice, 'id'>

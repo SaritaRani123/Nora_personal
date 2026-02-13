@@ -29,7 +29,9 @@ export const createInvoice = (req, res) => {
       paidDate: req.body.paidDate || null,
       source: req.body.source || 'manual',
       template: req.body.template,
-      colorPalette: req.body.colorPalette
+      colorPalette: req.body.colorPalette,
+      invoiceCurrency: req.body.invoiceCurrency || 'CAD',
+      lineItems: Array.isArray(req.body.lineItems) ? req.body.lineItems : undefined,
     };
 
     invoicesStore.unshift(newInvoice); // Add to beginning

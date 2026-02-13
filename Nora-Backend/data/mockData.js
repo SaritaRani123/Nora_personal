@@ -325,6 +325,8 @@ export const contacts = [
   }
 ];
 
+const DEFAULT_PALETTE = { name: 'Ocean Blue', header: '#1e40af', accent: '#3b82f6', tableHeader: '#1e3a8a' };
+
 export const invoices = [
   {
     id: 'INV-001',
@@ -335,7 +337,11 @@ export const invoices = [
     issueDate: '2026-01-10',
     dueDate: '2026-01-25',
     paidDate: '2026-01-20',
-    source: 'manual'
+    source: 'manual',
+    template: 'modern',
+    colorPalette: DEFAULT_PALETTE,
+    invoiceCurrency: 'CAD',
+    lineItems: [{ itemType: 'item', item: 'Consulting Services', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 5000, taxId: null, description: '' }],
   },
   {
     id: 'INV-002',
@@ -346,7 +352,11 @@ export const invoices = [
     issueDate: '2026-01-15',
     dueDate: '2026-01-30',
     paidDate: null,
-    source: 'manual'
+    source: 'manual',
+    template: 'classic',
+    colorPalette: { name: 'Forest Green', header: '#166534', accent: '#22c55e', tableHeader: '#15803d' },
+    invoiceCurrency: 'USD',
+    lineItems: [{ itemType: 'item', item: 'Project Delivery', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 2500, taxId: null, description: '' }],
   },
   {
     id: 'INV-003',
@@ -357,7 +367,11 @@ export const invoices = [
     issueDate: '2025-12-20',
     dueDate: '2026-01-05',
     paidDate: null,
-    source: 'manual'
+    source: 'manual',
+    template: 'formal',
+    colorPalette: DEFAULT_PALETTE,
+    invoiceCurrency: 'CAD',
+    lineItems: [{ itemType: 'item', item: 'Development Services', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 3750, taxId: null, description: '' }],
   },
   {
     id: 'INV-004',
@@ -368,7 +382,11 @@ export const invoices = [
     issueDate: '2026-01-22',
     dueDate: '2026-02-06',
     paidDate: null,
-    source: 'manual'
+    source: 'manual',
+    template: 'modern',
+    colorPalette: DEFAULT_PALETTE,
+    invoiceCurrency: 'CAD',
+    lineItems: [{ itemType: 'item', item: 'Support Package', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 1800, taxId: null, description: '' }],
   },
   {
     id: 'INV-005',
@@ -379,7 +397,11 @@ export const invoices = [
     issueDate: '2026-01-05',
     dueDate: '2026-01-20',
     paidDate: '2026-01-18',
-    source: 'manual'
+    source: 'manual',
+    template: 'modern',
+    colorPalette: DEFAULT_PALETTE,
+    invoiceCurrency: 'CAD',
+    lineItems: [{ itemType: 'item', item: 'Advisory Services', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 4200, taxId: null, description: '' }],
   }
 ];
 

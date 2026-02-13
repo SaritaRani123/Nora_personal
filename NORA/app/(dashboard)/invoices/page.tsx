@@ -68,6 +68,14 @@ import useSWR, { mutate } from 'swr'
 import { listInvoices, createInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
 import { generateInvoicePDF } from '@/lib/invoices/generateInvoicePDF'
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  CAD: '$', USD: '$', EUR: '€', INR: '₹', GBP: '£',
+}
+
+function getCurrencySymbol(invoice: Invoice): string {
+  return CURRENCY_SYMBOLS[invoice.invoiceCurrency ?? 'CAD'] ?? '$'
+}
+
 const statusConfig = {
   paid: { label: 'Paid', variant: 'default' as const, icon: CheckCircle2, color: 'text-success bg-success/10' },
   pending: { label: 'Pending', variant: 'secondary' as const, icon: Clock, color: 'text-chart-4 bg-chart-4/10' },
@@ -115,19 +123,12 @@ const InvoicesPage = () => {
     setPreviewInvoice(invoice)
   }
 
-  // Handle Edit - navigate to create page with invoice data in URL params
+  // Handle Edit - store full invoice in sessionStorage and navigate to create page
   const handleEdit = (invoice: Invoice) => {
-    const params = new URLSearchParams({
-      edit: 'true',
-      id: invoice.id,
-      client: invoice.client,
-      email: invoice.email,
-      amount: invoice.amount.toString(),
-      status: invoice.status,
-      issueDate: invoice.issueDate,
-      dueDate: invoice.dueDate,
-    })
-    router.push(`/invoices/create?${params.toString()}`)
+    try {
+      sessionStorage.setItem('invoiceToEdit', JSON.stringify(invoice))
+    } catch (_) { /* ignore */ }
+    router.push(`/invoices/create?edit=true&id=${encodeURIComponent(invoice.id)}`)
   }
 
   // Handle Download PDF - uses shared template-based generation (invoice.template, invoice.colorPalette)
@@ -135,17 +136,33 @@ const InvoicesPage = () => {
     await generateInvoicePDF(invoice)
   }, [])
 
-  // Handle Duplicate
+  // Handle Duplicate - include template, colorPalette, invoiceCurrency, lineItems
   const handleDuplicate = (invoice: Invoice) => {
     void (async () => {
       await createInvoice({
-      client: invoice.client,
-      email: invoice.email,
-      amount: invoice.amount,
-      status: 'draft',
-      issueDate: new Date().toISOString().split('T')[0],
-      dueDate: invoice.dueDate,
-      paidDate: null,
+        client: invoice.client,
+        email: invoice.email,
+        amount: invoice.amount,
+        status: 'draft',
+        issueDate: new Date().toISOString().split('T')[0],
+        dueDate: invoice.dueDate,
+        paidDate: null,
+        template: invoice.template,
+        colorPalette: invoice.colorPalette,
+        invoiceCurrency: invoice.invoiceCurrency ?? 'CAD',
+        lineItems: invoice.lineItems && invoice.lineItems.length > 0
+          ? invoice.lineItems.map((li) => ({
+              itemType: li.itemType ?? 'item',
+              item: li.item,
+              quantity: li.quantity ?? 1,
+              unit: li.unit ?? 'pcs',
+              hours: li.hours ?? 0,
+              minutes: li.minutes ?? 0,
+              price: li.price,
+              taxId: li.taxId ?? null,
+              description: li.description ?? '',
+            }))
+          : undefined,
       })
       await mutate('invoices')
     })()
@@ -275,7 +292,7 @@ const InvoicesPage = () => {
                           <p className="text-sm text-muted-foreground">{invoice.email}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium">${invoice.amount.toLocaleString()}</TableCell>
+                      <TableCell className="font-medium">{getCurrencySymbol(invoice)}{invoice.amount.toLocaleString()}</TableCell>
                       <TableCell>
                         <Badge variant={status.variant} className={`gap-1 ${status.color}`}>
                           <StatusIcon className="h-3 w-3" />
@@ -408,7 +425,7 @@ const InvoicesPage = () => {
                   <div className="mt-6 pt-6 border-t">
                     <div className="flex items-center justify-between">
                       <span className="text-lg font-semibold">Total Amount</span>
-                      <span className="text-3xl font-bold">${previewInvoice.amount.toLocaleString()}</span>
+                      <span className="text-3xl font-bold">{getCurrencySymbol(previewInvoice)}{previewInvoice.amount.toLocaleString()}</span>
                     </div>
                   </div>
                 </CardContent>

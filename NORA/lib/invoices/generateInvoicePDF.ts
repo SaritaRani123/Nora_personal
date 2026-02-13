@@ -91,25 +91,53 @@ function getTaxBreakdown(payload: InvoicePDFPayload): { name: string; amount: nu
   return breakdown
 }
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  CAD: '$', USD: '$', EUR: '€', INR: '₹', GBP: '£',
+}
+
 /**
  * Build payload from minimal Invoice (for list page download).
+ * Uses invoice.lineItems and invoice.invoiceCurrency when present.
  */
 function buildPayloadFromInvoice(invoice: Invoice): InvoicePDFPayload {
   const template = invoice.template || 'modern'
   const colorPalette = invoice.colorPalette || DEFAULT_COLOR_PALETTE
-  const lineItems = [
-    {
-      itemType: 'item' as const,
-      item: 'Invoice Amount',
-      quantity: 1,
-      unit: 'pcs',
-      hours: 0,
-      minutes: 0,
-      price: invoice.amount,
-      taxId: null as string | null,
-      description: '',
-    },
-  ]
+  const invoiceCurrency = invoice.invoiceCurrency || 'CAD'
+  const currencySymbol = CURRENCY_SYMBOLS[invoiceCurrency] ?? '$'
+
+  const rawLineItems = invoice.lineItems && invoice.lineItems.length > 0
+    ? invoice.lineItems
+    : [
+        {
+          itemType: 'item' as const,
+          item: 'Invoice Amount',
+          quantity: 1,
+          unit: 'pcs',
+          hours: 0,
+          minutes: 0,
+          price: invoice.amount,
+          taxId: null as string | null,
+          description: '',
+        },
+      ]
+
+  const lineItems = rawLineItems.map((li) => ({
+    itemType: (li.itemType || 'item') as 'item' | 'hourly',
+    item: li.item || 'Item',
+    quantity: li.quantity ?? 1,
+    unit: li.unit || 'pcs',
+    hours: li.hours ?? 0,
+    minutes: li.minutes ?? 0,
+    price: li.price ?? 0,
+    taxId: li.taxId ?? null,
+    description: li.description ?? '',
+  }))
+
+  const subtotal = lineItems.reduce((sum, li) => {
+    if (li.itemType === 'hourly') return sum + (li.hours + li.minutes / 60) * li.price
+    return sum + li.quantity * li.price
+  }, 0)
+
   return {
     invoiceNumber: invoice.id,
     invoiceDate: invoice.issueDate,
@@ -126,14 +154,14 @@ function buildPayloadFromInvoice(invoice: Invoice): InvoicePDFPayload {
     contact: { name: invoice.client, email: invoice.email, address: '' },
     lineItems,
     taxRates: [],
-    subtotal: invoice.amount,
+    subtotal,
     discount: 0,
     discountType: 'percentage',
     discountAmount: 0,
     totalTax: 0,
     total: invoice.amount,
-    currencySymbol: '$',
-    invoiceCurrency: 'CAD',
+    currencySymbol,
+    invoiceCurrency,
     logoSize: 'medium',
     notes: '',
   }
