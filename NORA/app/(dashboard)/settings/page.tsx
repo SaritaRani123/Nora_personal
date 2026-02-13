@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { User, Bell, Shield, Save } from 'lucide-react'
+import { useUser } from '@/lib/contexts/UserContext'
+import { getUserInitials } from '@/lib/services/user'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,7 +12,27 @@ import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 
 export default function SettingsPage() {
+  const { user, updateUser } = useUser()
   const [activeTab, setActiveTab] = useState('profile')
+  const [form, setForm] = useState({
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    phone: user.phone,
+  })
+
+  useEffect(() => {
+    setForm({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phone: user.phone,
+    })
+  }, [user.firstName, user.lastName, user.email, user.phone])
+
+  const handleSaveProfile = () => {
+    updateUser(form)
+  }
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
@@ -57,7 +79,7 @@ export default function SettingsPage() {
               <CardContent className="space-y-6">
                 <div className="flex items-center gap-4">
                   <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground">
-                    JD
+                    {getUserInitials(user)}
                   </div>
                   <div>
                     <Button variant="outline" size="sm" className="bg-transparent">
@@ -70,23 +92,23 @@ export default function SettingsPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="firstName">First Name</Label>
-                    <Input id="firstName" defaultValue="John" className="bg-secondary/50 border-0" />
+                    <Input id="firstName" value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} className="bg-secondary/50 border-0" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="lastName">Last Name</Label>
-                    <Input id="lastName" defaultValue="Doe" className="bg-secondary/50 border-0" />
+                    <Input id="lastName" value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} className="bg-secondary/50 border-0" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" defaultValue="john@business.com" className="bg-secondary/50 border-0" />
+                    <Input id="email" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="bg-secondary/50 border-0" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone</Label>
-                    <Input id="phone" type="tel" defaultValue="+1 (555) 123-4567" className="bg-secondary/50 border-0" />
+                    <Input id="phone" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} className="bg-secondary/50 border-0" />
                   </div>
                 </div>
                 <div className="flex justify-end">
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleSaveProfile}>
                     <Save className="mr-2 h-4 w-4" />
                     Save Changes
                   </Button>

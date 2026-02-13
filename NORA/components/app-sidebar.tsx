@@ -1,6 +1,8 @@
 'use client'
 
 import Link from 'next/link'
+import { useUser } from '@/lib/contexts/UserContext'
+import { getUserInitials } from '@/lib/services/user'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
@@ -41,6 +43,7 @@ const navItems = [
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const { user } = useUser()
 
   return (
     <Sidebar>
@@ -77,11 +80,11 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium text-sidebar-accent-foreground">
-            JD
+            {getUserInitials(user)}
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-medium text-sidebar-foreground">John Doe</span>
-            <span className="text-xs text-sidebar-foreground/60">john@business.com</span>
+            <span className="text-sm font-medium text-sidebar-foreground">{user.firstName} {user.lastName}</span>
+            <span className="text-xs text-sidebar-foreground/60">{user.email}</span>
           </div>
         </div>
       </SidebarFooter>

@@ -70,6 +70,7 @@ import { Switch } from '@/components/ui/switch'
 import useSWR, { mutate } from 'swr'
 import { listContacts, createContact, type Contact as ApiContact } from '@/lib/services/contacts'
 import { listInvoices, createInvoice, updateInvoice, type Invoice } from '@/lib/services/invoices'
+import { generateInvoicePDFFromPayload, type InvoicePDFPayload } from '@/lib/invoices/generateInvoicePDF'
 
 // Helper function for case-insensitive alphabetical sorting
 const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
@@ -787,301 +788,31 @@ function CreateInvoiceContent() {
     }
   }
 
-  // Download PDF handler - captures the exact template preview using html2canvas in isolated iframe
+  // Download PDF handler - uses shared template + html2canvas + jsPDF logic
   const handleDownloadPDF = useCallback(async () => {
-    try {
-      const html2canvas = (await import('html2canvas')).default
-      const { jsPDF } = await import('jspdf')
-      
-      // Create an isolated iframe to avoid oklch color issues from global CSS
-      const iframe = document.createElement('iframe')
-      iframe.style.cssText = 'position: fixed; left: -9999px; top: 0; width: 650px; height: 900px; border: none;'
-      document.body.appendChild(iframe)
-      
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
-      if (!iframeDoc) {
-        document.body.removeChild(iframe)
-        return
-      }
-      
-      // Write a clean HTML document with no external CSS
-      iframeDoc.open()
-      iframeDoc.write('<!DOCTYPE html><html><head><style>* { margin: 0; padding: 0; box-sizing: border-box; }</style></head><body></body></html>')
-      iframeDoc.close()
-      
-      const tempContainer = iframeDoc.createElement('div')
-      tempContainer.style.cssText = 'width: 595px; background: white;'
-      iframeDoc.body.appendChild(tempContainer)
-      
-      // Generate the template HTML with all inline styles using hex colors
-      const taxBreakdown = getTaxBreakdown()
-      const logoSizeStyles = { small: '40px', medium: '60px', large: '80px' }
-      const logoStyle = `height: ${logoSizeStyles[logoSize]}; width: auto; object-fit: contain;`
-      
-      // Shared styles
-      const headerBg = `background-color: ${activeColors.header};`
-      const headerColor = `color: ${activeColors.header};`
-      const accentColor = `color: ${activeColors.accent};`
-      const accentBg = `background-color: ${activeColors.accent}15;`
-      const tableHeaderBg = `background-color: ${activeColors.tableHeader};`
-      
-      let templateHtml = ''
-      
-      if (selectedTemplate === 'classic') {
-        templateHtml = `
-          <div style="background: white; padding: 32px; font-family: Arial, sans-serif; font-size: 14px; color: #111; min-height: 700px; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; padding-bottom: 24px; border-bottom: 2px solid ${activeColors.header};">
-              <div>
-                ${businessDetails.logo ? `<img src="${businessDetails.logo}" style="${logoStyle}" crossorigin="anonymous" />` : `<div style="font-size: 24px; font-weight: bold;">${businessDetails.name}</div>`}
-                <p style="margin-top: 8px; font-size: 12px; color: #666; white-space: pre-line;">${businessDetails.address}</p>
-              </div>
-              <div style="text-align: right;">
-                <h1 style="font-size: 28px; font-weight: bold; ${headerColor}">${businessDetails.invoiceTitle}</h1>
-                <div style="margin-top: 8px; font-size: 12px;">
-                  <p><span style="font-weight: 500;">Invoice #:</span> ${invoiceDetails.invoiceNumber}</p>
-                  <p><span style="font-weight: 500;">Date:</span> ${formatDate(invoiceDetails.invoiceDate)}</p>
-                  ${invoiceDetails.dueDate ? `<p><span style="font-weight: 500;">Due:</span> ${formatDate(invoiceDetails.dueDate)}</p>` : ''}
-                  <p><span style="font-weight: 500;">Currency:</span> ${invoiceCurrency}</p>
-                </div>
-              </div>
-            </div>
-            <div style="padding: 24px 0;">
-              <h3 style="font-size: 12px; font-weight: bold; text-transform: uppercase; margin-bottom: 8px; ${headerColor}">Bill To</h3>
-              ${selectedContact ? `
-                <p style="font-weight: 600;">${selectedContact.name}</p>
-                <p style="font-size: 12px; color: #666;">${selectedContact.email}</p>
-                ${selectedContact.address ? `<p style="font-size: 12px; color: #666; margin-top: 4px;">${selectedContact.address}</p>` : ''}
-              ` : '<p style="font-size: 12px; color: #999; font-style: italic;">No contact selected</p>'}
-            </div>
-            <table style="width: 100%; border-collapse: collapse;">
-              <thead>
-                <tr style="${tableHeaderBg}">
-                  <th style="padding: 8px 12px; text-align: left; font-size: 12px; font-weight: bold; color: white;">Description</th>
-                  <th style="padding: 8px; text-align: center; font-size: 12px; font-weight: bold; color: white;">Qty/Hours</th>
-                  <th style="padding: 8px; text-align: right; font-size: 12px; font-weight: bold; color: white;">Price</th>
-                  <th style="padding: 8px; text-align: right; font-size: 12px; font-weight: bold; color: white;">Tax</th>
-                  <th style="padding: 8px 12px; text-align: right; font-size: 12px; font-weight: bold; color: white;">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${lineItems.map((item, idx) => {
-                  const tax = item.taxId ? taxRates.find(t => t.id === item.taxId) : null
-                  const amount = calculateLineItemAmount(item)
-                  const qtyDisplay = item.itemType === 'hourly' ? `${item.hours}h ${item.minutes}m` : `${item.quantity} ${item.unit}`
-                  return `
-                    <tr style="background: ${idx % 2 === 0 ? '#f9fafb' : 'white'};">
-                      <td style="padding: 8px 12px; font-size: 12px;">
-                        <div>${item.item || 'Item'}</div>
-                        ${item.description ? `<div style="color: #888; font-size: 10px; margin-top: 2px;">${item.description}</div>` : ''}
-                      </td>
-                      <td style="padding: 8px; text-align: center; font-size: 12px;">${qtyDisplay}</td>
-                      <td style="padding: 8px; text-align: right; font-size: 12px;">${currencySymbol}${item.price.toFixed(2)}${item.itemType === 'hourly' ? '/hr' : ''}</td>
-                      <td style="padding: 8px; text-align: right; font-size: 12px;">${tax ? tax.name : '-'}</td>
-                      <td style="padding: 8px 12px; text-align: right; font-size: 12px; font-weight: 500;">${currencySymbol}${amount.toFixed(2)}</td>
-                    </tr>
-                  `
-                }).join('')}
-              </tbody>
-            </table>
-            <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
-              <div style="width: 224px;">
-                <div style="display: flex; justify-content: space-between; font-size: 12px;"><span>Subtotal</span><span>${currencySymbol}${subtotal.toFixed(2)}</span></div>
-                ${discount > 0 ? `<div style="display: flex; justify-content: space-between; font-size: 12px; color: #16a34a;"><span>Discount ${discountType === 'percentage' ? `(${discount}%)` : ''}</span><span>-${currencySymbol}${discountAmount.toFixed(2)}</span></div>` : ''}
-                ${taxBreakdown.map(tax => `<div style="display: flex; justify-content: space-between; font-size: 12px;"><span>${tax.name}</span><span>${currencySymbol}${tax.amount.toFixed(2)}</span></div>`).join('')}
-                <div style="display: flex; justify-content: space-between; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 4px; font-weight: bold; ${headerColor}"><span>Total (${invoiceCurrency})</span><span>${currencySymbol}${total.toFixed(2)}</span></div>
-              </div>
-            </div>
-            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #ddd;">
-              ${notes ? `<div style="margin-bottom: 8px;"><h3 style="font-size: 12px; font-weight: bold; margin-bottom: 4px;">Notes</h3><p style="font-size: 12px; color: #666;">${notes}</p></div>` : ''}
-              <p style="font-size: 12px; color: #888;">${businessDetails.summary}</p>
-            </div>
-            <div style="margin-top: auto; padding-top: 24px;">
-              <p style="text-align: center; font-size: 18px; font-style: italic; font-family: Georgia, serif; ${headerColor}">Thank you</p>
-            </div>
-          </div>
-        `
-      } else if (selectedTemplate === 'modern') {
-        templateHtml = `
-          <div style="background: white; padding: 32px; font-family: Arial, sans-serif; font-size: 14px; color: #111; min-height: 700px; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; align-items: start; ${headerBg} padding: 20px; border-radius: 12px; margin-bottom: 24px;">
-              <div style="color: white;">
-                ${businessDetails.logo ? `<img src="${businessDetails.logo}" style="${logoStyle} filter: brightness(0) invert(1);" crossorigin="anonymous" />` : `<div style="font-size: 24px; font-weight: bold;">${businessDetails.name}</div>`}
-              </div>
-              <div style="text-align: right; color: white;">
-                <h1 style="font-size: 28px; font-weight: bold; letter-spacing: 2px;">${businessDetails.invoiceTitle}</h1>
-                <p style="font-size: 14px; opacity: 0.9;">#${invoiceDetails.invoiceNumber}</p>
-              </div>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 24px;">
-              <div style="${accentBg} padding: 12px; border-radius: 8px;">
-                <h3 style="font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; ${accentColor}">Bill To</h3>
-                ${selectedContact ? `
-                  <p style="font-weight: 600;">${selectedContact.name}</p>
-                  <p style="font-size: 12px; color: #666;">${selectedContact.email}</p>
-                  ${selectedContact.address ? `<p style="font-size: 12px; color: #666; margin-top: 4px;">${selectedContact.address}</p>` : ''}
-                ` : '<p style="font-size: 12px; color: #999; font-style: italic;">No contact selected</p>'}
-              </div>
-              <div style="text-align: right;">
-                <p style="font-size: 12px;"><span style="color: #666;">Issue Date:</span> ${formatDate(invoiceDetails.invoiceDate)}</p>
-                <p style="font-size: 12px;"><span style="color: #666;">Due Date:</span> ${formatDate(invoiceDetails.dueDate)}</p>
-                <p style="font-size: 12px;"><span style="color: #666;">Currency:</span> ${invoiceCurrency}</p>
-              </div>
-            </div>
-            <table style="width: 100%; border-collapse: collapse; border-radius: 8px; overflow: hidden;">
-              <thead>
-                <tr style="${tableHeaderBg}">
-                  <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: bold; color: white;">Description</th>
-                  <th style="padding: 12px; text-align: center; font-size: 12px; font-weight: bold; color: white;">Qty</th>
-                  <th style="padding: 12px; text-align: right; font-size: 12px; font-weight: bold; color: white;">Price</th>
-                  <th style="padding: 12px; text-align: right; font-size: 12px; font-weight: bold; color: white;">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${lineItems.map((item, idx) => {
-                  const amount = calculateLineItemAmount(item)
-                  const qtyDisplay = item.itemType === 'hourly' ? `${item.hours}h ${item.minutes}m` : `${item.quantity}`
-                  return `
-                    <tr style="background: ${idx % 2 === 0 ? '#f9fafb' : 'white'};">
-                      <td style="padding: 12px; font-size: 12px;">${item.item || 'Item'}</td>
-                      <td style="padding: 12px; text-align: center; font-size: 12px;">${qtyDisplay}</td>
-                      <td style="padding: 12px; text-align: right; font-size: 12px;">${currencySymbol}${item.price.toFixed(2)}</td>
-                      <td style="padding: 12px; text-align: right; font-size: 12px; font-weight: 500;">${currencySymbol}${amount.toFixed(2)}</td>
-                    </tr>
-                  `
-                }).join('')}
-              </tbody>
-            </table>
-            <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
-              <div style="width: 240px; ${accentBg} padding: 16px; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px;"><span>Subtotal</span><span>${currencySymbol}${subtotal.toFixed(2)}</span></div>
-                ${discount > 0 ? `<div style="display: flex; justify-content: space-between; font-size: 12px; color: #16a34a; margin-bottom: 8px;"><span>Discount</span><span>-${currencySymbol}${discountAmount.toFixed(2)}</span></div>` : ''}
-                ${totalTax > 0 ? `<div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px;"><span>Tax</span><span>${currencySymbol}${totalTax.toFixed(2)}</span></div>` : ''}
-                <div style="display: flex; justify-content: space-between; border-top: 2px solid ${activeColors.accent}; padding-top: 8px; font-weight: bold; font-size: 16px; ${accentColor}"><span>Total</span><span>${currencySymbol}${total.toFixed(2)}</span></div>
-              </div>
-            </div>
-            <div style="margin-top: auto; padding-top: 24px; text-align: center;">
-              <p style="font-size: 12px; color: #888;">${businessDetails.summary}</p>
-            </div>
-          </div>
-        `
-      } else {
-        // Formal template
-        templateHtml = `
-          <div style="background: white; font-family: Arial, sans-serif; font-size: 14px; color: #111; min-height: 700px; display: flex; flex-direction: column;">
-            <div style="${headerBg} padding: 24px 32px; color: white;">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                  ${businessDetails.logo ? `<img src="${businessDetails.logo}" style="${logoStyle} filter: brightness(0) invert(1);" crossorigin="anonymous" />` : `<div style="font-size: 24px; font-weight: bold;">${businessDetails.name}</div>`}
-                </div>
-                <div style="text-align: right;">
-                  <h1 style="font-size: 24px; font-weight: bold; letter-spacing: 3px;">${businessDetails.invoiceTitle}</h1>
-                  <p style="font-size: 12px; opacity: 0.9;">#${invoiceDetails.invoiceNumber}</p>
-                </div>
-              </div>
-            </div>
-            <div style="padding: 32px;">
-              <div style="display: flex; justify-content: space-between; padding: 24px 0; border-top: 1px solid ${activeColors.header}; border-bottom: 1px solid ${activeColors.header};">
-                <div>
-                  <h3 style="font-size: 12px; font-weight: bold; text-transform: uppercase; margin-bottom: 8px; ${headerColor}">Bill To</h3>
-                  ${selectedContact ? `
-                    <p style="font-weight: 600;">${selectedContact.name}</p>
-                    <p style="font-size: 12px; color: #666;">${selectedContact.email}</p>
-                    ${selectedContact.address ? `<p style="font-size: 12px; color: #666; margin-top: 4px;">${selectedContact.address}</p>` : ''}
-                  ` : '<p style="font-size: 12px; color: #999; font-style: italic;">No contact selected</p>'}
-                </div>
-                <div style="text-align: right;">
-                  <p style="font-size: 12px;"><span style="font-weight: 500;">Issue Date:</span> ${formatDate(invoiceDetails.invoiceDate)}</p>
-                  <p style="font-size: 12px;"><span style="font-weight: 500;">Due Date:</span> ${formatDate(invoiceDetails.dueDate)}</p>
-                </div>
-              </div>
-              <table style="width: 100%; border-collapse: collapse; margin-top: 24px;">
-                <thead>
-                  <tr style="border-bottom: 2px solid ${activeColors.tableHeader};">
-                    <th style="padding: 12px 0; text-align: left; font-size: 12px; font-weight: bold; ${headerColor}">Description</th>
-                    <th style="padding: 12px 0; text-align: center; font-size: 12px; font-weight: bold; ${headerColor}">Qty</th>
-                    <th style="padding: 12px 0; text-align: right; font-size: 12px; font-weight: bold; ${headerColor}">Price</th>
-                    <th style="padding: 12px 0; text-align: right; font-size: 12px; font-weight: bold; ${headerColor}">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${lineItems.map((item) => {
-                    const amount = calculateLineItemAmount(item)
-                    const qtyDisplay = item.itemType === 'hourly' ? `${item.hours}h ${item.minutes}m` : `${item.quantity}`
-                    return `
-                      <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding: 12px 0; font-size: 12px;">${item.item || 'Item'}</td>
-                        <td style="padding: 12px 0; text-align: center; font-size: 12px;">${qtyDisplay}</td>
-                        <td style="padding: 12px 0; text-align: right; font-size: 12px;">${currencySymbol}${item.price.toFixed(2)}</td>
-                        <td style="padding: 12px 0; text-align: right; font-size: 12px; font-weight: 500;">${currencySymbol}${amount.toFixed(2)}</td>
-                      </tr>
-                    `
-                  }).join('')}
-                </tbody>
-              </table>
-              <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
-                <div style="width: 240px; border-top: 2px solid ${activeColors.header}; padding-top: 16px;">
-                  <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px;"><span>Subtotal</span><span>${currencySymbol}${subtotal.toFixed(2)}</span></div>
-                  ${discount > 0 ? `<div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px;"><span>Discount</span><span>-${currencySymbol}${discountAmount.toFixed(2)}</span></div>` : ''}
-                  ${totalTax > 0 ? `<div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px;"><span>Tax</span><span>${currencySymbol}${totalTax.toFixed(2)}</span></div>` : ''}
-                  <div style="display: flex; justify-content: space-between; border-top: 2px solid ${activeColors.header}; padding-top: 8px; font-weight: bold; font-size: 16px; ${headerColor}"><span>Total (${invoiceCurrency})</span><span>${currencySymbol}${total.toFixed(2)}</span></div>
-                </div>
-              </div>
-              <div style="margin-top: auto; padding-top: 32px; text-align: center;">
-                <p style="font-size: 12px; color: #888;">${businessDetails.summary}</p>
-              </div>
-            </div>
-          </div>
-        `
-      }
-      
-      tempContainer.innerHTML = templateHtml
-      
-      // Wait for images to load
-      const images = tempContainer.querySelectorAll('img')
-      await Promise.all(Array.from(images).map(img => {
-        if (img.complete) return Promise.resolve()
-        return new Promise(resolve => {
-          img.onload = resolve
-          img.onerror = resolve
-        })
-      }))
-      
-      // Capture with html2canvas from iframe
-      const canvas = await html2canvas(tempContainer.firstElementChild as HTMLElement, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 650,
-        windowHeight: 900,
-      })
-      
-      // Remove iframe
-      document.body.removeChild(iframe)
-      
-      // Create PDF
-      const imgData = canvas.toDataURL('image/png')
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-      })
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth()
-      const pdfHeight = pdf.internal.pageSize.getHeight()
-      const imgWidth = canvas.width
-      const imgHeight = canvas.height
-      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight)
-      const imgX = (pdfWidth - imgWidth * ratio) / 2
-      const imgY = 0
-      
-      pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio)
-      pdf.save(`${invoiceDetails.invoiceNumber}.pdf`)
-    } catch (error) {
-      console.error('Failed to generate PDF:', error)
+    const payload: InvoicePDFPayload = {
+      invoiceNumber: invoiceDetails.invoiceNumber,
+      invoiceDate: invoiceDetails.invoiceDate,
+      dueDate: invoiceDetails.dueDate || invoiceDetails.invoiceDate,
+      template: selectedTemplate,
+      colorPalette: activeColors,
+      businessDetails,
+      contact: selectedContact ? { name: selectedContact.name, email: selectedContact.email, address: selectedContact.address || '' } : null,
+      lineItems,
+      taxRates,
+      subtotal,
+      discount,
+      discountType,
+      discountAmount,
+      totalTax,
+      total,
+      currencySymbol,
+      invoiceCurrency,
+      logoSize,
+      notes,
     }
-  }, [invoiceDetails, selectedTemplate, activeColors, businessDetails, selectedContact, lineItems, subtotal, discountAmount, discountType, discount, totalTax, total, currencySymbol, logoSize, notes, invoiceCurrency, taxRates, getTaxBreakdown, calculateLineItemAmount, formatDate])
+    await generateInvoicePDFFromPayload(payload)
+  }, [invoiceDetails, selectedTemplate, activeColors, businessDetails, selectedContact, lineItems, subtotal, discountAmount, discountType, discount, totalTax, total, currencySymbol, logoSize, notes, invoiceCurrency, taxRates])
 
   // Send invoice handler
   const handleSendInvoice = async () => {

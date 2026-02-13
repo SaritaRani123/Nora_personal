@@ -1,6 +1,8 @@
 'use client'
 
 import { Moon, Sun, LogOut } from 'lucide-react'
+import { useUser } from '@/lib/contexts/UserContext'
+import { getUserInitials } from '@/lib/services/user'
 import { useTheme } from 'next-themes'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -17,6 +19,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 export function DashboardHeader() {
   const { theme, setTheme } = useTheme()
   const router = useRouter()
+  const { user } = useUser()
 
   const handleLogout = () => {
     router.push('/sign-in')
@@ -43,15 +46,15 @@ export function DashboardHeader() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-2 px-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
-                JD
+                {getUserInitials(user)}
               </div>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>
               <div className="flex flex-col">
-                <span>John Doe</span>
-                <span className="text-xs font-normal text-muted-foreground">john@business.com</span>
+                <span>{user.firstName} {user.lastName}</span>
+                <span className="text-xs font-normal text-muted-foreground">{user.email}</span>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

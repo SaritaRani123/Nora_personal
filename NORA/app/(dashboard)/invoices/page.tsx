@@ -66,6 +66,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import useSWR, { mutate } from 'swr'
 import { listInvoices, createInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
+import { generateInvoicePDF } from '@/lib/invoices/generateInvoicePDF'
 
 const statusConfig = {
   paid: { label: 'Paid', variant: 'default' as const, icon: CheckCircle2, color: 'text-success bg-success/10' },
@@ -129,115 +130,9 @@ const InvoicesPage = () => {
     router.push(`/invoices/create?${params.toString()}`)
   }
 
-  // Helper to convert hex color to RGB
-  const hexToRgb = (hex: string): [number, number, number] => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-    return result 
-      ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)]
-      : [30, 64, 175] // Default blue
-  }
-
-  // Handle Download PDF
+  // Handle Download PDF - uses shared template-based generation (invoice.template, invoice.colorPalette)
   const handleDownloadPDF = useCallback(async (invoice: Invoice) => {
-    try {
-      const { jsPDF } = await import('jspdf')
-      
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-      })
-
-      const pageWidth = pdf.internal.pageSize.getWidth()
-      
-      // Use saved color palette or default
-      const headerColor = invoice.colorPalette?.header 
-        ? hexToRgb(invoice.colorPalette.header) 
-        : [30, 64, 175] as [number, number, number]
-      const tableHeaderColor = invoice.colorPalette?.tableHeader 
-        ? hexToRgb(invoice.colorPalette.tableHeader) 
-        : [30, 58, 138] as [number, number, number]
-      
-      // Header - using saved or default color
-      pdf.setFillColor(headerColor[0], headerColor[1], headerColor[2])
-      pdf.rect(0, 0, pageWidth, 40, 'F')
-      
-      // White text for header
-      pdf.setTextColor(255, 255, 255)
-      pdf.setFontSize(24)
-      pdf.setFont('helvetica', 'bold')
-      pdf.text('INVOICE', 20, 25)
-      
-      pdf.setFontSize(12)
-      pdf.setFont('helvetica', 'normal')
-      pdf.text(`#${invoice.id}`, pageWidth - 20, 25, { align: 'right' })
-      
-      // Reset to black text
-      pdf.setTextColor(0, 0, 0)
-      
-      // Invoice details
-      pdf.setFontSize(10)
-      pdf.setFont('helvetica', 'bold')
-      pdf.text('Bill To:', 20, 55)
-      pdf.setFont('helvetica', 'normal')
-      pdf.text(invoice.client || 'N/A', 20, 62)
-      pdf.text(invoice.email || 'N/A', 20, 68)
-      
-      // Dates
-      pdf.setFont('helvetica', 'bold')
-      pdf.text('Issue Date:', pageWidth - 60, 55)
-      pdf.setFont('helvetica', 'normal')
-      pdf.text(formatDate(invoice.issueDate), pageWidth - 60, 62)
-      
-      pdf.setFont('helvetica', 'bold')
-      pdf.text('Due Date:', pageWidth - 60, 72)
-      pdf.setFont('helvetica', 'normal')
-      pdf.text(formatDate(invoice.dueDate), pageWidth - 60, 79)
-      
-      // Status
-      const statusLabel = statusConfig[invoice.status].label
-      pdf.setFont('helvetica', 'bold')
-      pdf.text('Status:', pageWidth - 60, 89)
-      pdf.setFont('helvetica', 'normal')
-      pdf.text(statusLabel, pageWidth - 60, 96)
-      
-      // Line - gray color
-      pdf.setDrawColor(200, 200, 200)
-      pdf.line(20, 110, pageWidth - 20, 110)
-      
-      // Table header - using saved or default color
-      pdf.setFillColor(tableHeaderColor[0], tableHeaderColor[1], tableHeaderColor[2])
-      pdf.rect(20, 115, pageWidth - 40, 10, 'F')
-      pdf.setTextColor(255, 255, 255)
-      pdf.setFont('helvetica', 'bold')
-      pdf.setFontSize(10)
-      pdf.text('Description', 25, 122)
-      pdf.text('Amount', pageWidth - 45, 122, { align: 'right' })
-      
-      // Table content
-      pdf.setTextColor(0, 0, 0)
-      pdf.setFont('helvetica', 'normal')
-      pdf.text('Invoice Amount', 25, 135)
-      pdf.text(`$${invoice.amount.toLocaleString()}`, pageWidth - 45, 135, { align: 'right' })
-      
-      // Total line
-      pdf.line(20, 145, pageWidth - 20, 145)
-      pdf.setFont('helvetica', 'bold')
-      pdf.setFontSize(12)
-      pdf.text('Total:', pageWidth - 70, 155)
-      pdf.text(`$${invoice.amount.toLocaleString()}`, pageWidth - 25, 155, { align: 'right' })
-      
-      // Footer - gray text
-      pdf.setFontSize(9)
-      pdf.setFont('helvetica', 'normal')
-      pdf.setTextColor(128, 128, 128)
-      pdf.text('Thank you for your business!', pageWidth / 2, 280, { align: 'center' })
-      
-      // Save the PDF
-      pdf.save(`${invoice.id}.pdf`)
-    } catch (error) {
-      console.error('Failed to generate PDF:', error)
-    }
+    await generateInvoicePDF(invoice)
   }, [])
 
   // Handle Duplicate

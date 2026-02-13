@@ -5,6 +5,7 @@ import React from "react"
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/app-sidebar'
 import { DashboardHeader } from '@/components/dashboard-header'
+import { UserProvider } from '@/lib/contexts/UserContext'
 
 export default function DashboardLayout({
   children,
@@ -12,6 +13,7 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
+    <UserProvider>
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
@@ -21,5 +23,6 @@ export default function DashboardLayout({
         </main>
       </SidebarInset>
     </SidebarProvider>
+    </UserProvider>
   )
 }
