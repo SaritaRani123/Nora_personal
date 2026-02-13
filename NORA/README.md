@@ -37,7 +37,7 @@ Open `http://localhost:3000`.
 - All data consumed by the UI is fetched via `Nora/lib/services/*`.
 - All API responses are expected/handled in **array form** (even single items).
 
-See `API.md` for the complete endpoint list and examples.
+See `docs/API-Usage.md` for which APIs the frontend calls and how. Backend API details are in `Nora-Backend/docs/`.
 
 **Run the backend first** (from `Nora-Backend/`: `npm install` then `npm start`) so the frontend can load data from `http://localhost:8080`.
 
@@ -54,4 +54,5 @@ See `API.md` for the complete endpoint list and examples.
 - **`hooks/`**: shared React hooks
 - **`types/`**: shared TypeScript types
 - **`public/`**: static assets
+- **`docs/`**: frontend documentation (API usage, features)
 

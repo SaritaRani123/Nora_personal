@@ -96,13 +96,26 @@ Nora-Backend/
 │   ├── stats.js
 │   ├── charts.js
 │   └── reports.js
+├── docs/                     # API documentation (organized)
+│   ├── README.md
+│   ├── API.md                # Overview & quick reference
+│   ├── API-Invoices.md
+│   ├── API-Expenses.md
+│   ├── API-Contacts.md
+│   ├── API-Categories.md
+│   ├── API-Budget.md
+│   ├── API-Statements.md
+│   ├── API-PayableSummary.md
+│   ├── API-Stats.md
+│   ├── API-Charts.md
+│   └── API-Reports.md
 ├── README.md                 # This file
-└── API.md                    # API documentation
+└── API.md                    # API documentation (legacy)
 ```
 
 ## API Endpoints
 
-All endpoints return data in **array format**. See `API.md` for detailed documentation.
+All endpoints return data in **array format**. See `docs/API.md` and `docs/API-Invoices.md` for detailed request/response documentation.
 
 ### Main Endpoints
 
