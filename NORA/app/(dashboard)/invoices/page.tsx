@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
   TableBody,
@@ -66,6 +66,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import useSWR, { mutate } from 'swr'
 import { listInvoices, createInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
+import { listWorkDone, type WorkDoneEntry } from '@/lib/services/work-done'
 import { generateInvoicePDF } from '@/lib/invoices/generateInvoicePDF'
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -92,6 +93,33 @@ const InvoicesPage = () => {
   const previewRef = useRef<HTMLDivElement>(null)
   
   const { data: invoices = [] } = useSWR<Invoice[]>('invoices', () => listInvoices())
+  const { data: unbilledWork = [] } = useSWR<WorkDoneEntry[]>('work-done-unbilled', () =>
+    listWorkDone({ unbilledOnly: true })
+  )
+
+  const [selectedUnbilledIds, setSelectedUnbilledIds] = useState<Set<string>>(new Set())
+
+  const toggleUnbilledSelection = (id: string) => {
+    setSelectedUnbilledIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const toggleAllUnbilled = () => {
+    if (selectedUnbilledIds.size === unbilledWork.length) setSelectedUnbilledIds(new Set())
+    else setSelectedUnbilledIds(new Set(unbilledWork.map((w) => w.id)))
+  }
+
+  const handleCreateInvoiceFromUnbilled = () => {
+    const selected = unbilledWork.filter((w) => selectedUnbilledIds.has(w.id))
+    if (selected.length === 0) return
+    try {
+      sessionStorage.setItem('unbilledWorkEntriesForInvoice', JSON.stringify(selected))
+    } catch (_) {}
+    router.push('/invoices/create?from=unbilled')
+  }
 
   // Calculate stats from invoices
   const stats = useMemo(() => ({
@@ -229,6 +257,74 @@ const InvoicesPage = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Unbilled Work */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Unbilled Work</CardTitle>
+              <CardDescription>Work done from Calendar. Select items and create an invoice.</CardDescription>
+            </div>
+            <Button
+              onClick={handleCreateInvoiceFromUnbilled}
+              disabled={selectedUnbilledIds.size === 0}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Create Invoice
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={unbilledWork.length > 0 && selectedUnbilledIds.size === unbilledWork.length}
+                    onCheckedChange={toggleAllUnbilled}
+                    aria-label="Select all"
+                  />
+                </TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Contact</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead className="text-right">Hours</TableHead>
+                <TableHead className="text-right">Rate</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {unbilledWork.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    No unbilled work. Add work on the Calendar page to see it here.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                unbilledWork.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedUnbilledIds.has(row.id)}
+                        onCheckedChange={() => toggleUnbilledSelection(row.id)}
+                        aria-label={`Select ${row.description}`}
+                      />
+                    </TableCell>
+                    <TableCell>{formatDate(row.date)}</TableCell>
+                    <TableCell>{row.contact || '—'}</TableCell>
+                    <TableCell>{row.description || '—'}</TableCell>
+                    <TableCell className="text-right">{row.hours}</TableCell>
+                    <TableCell className="text-right">${row.rate.toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-medium">${row.amount.toLocaleString()}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* Recent Invoices */}
       <Card>

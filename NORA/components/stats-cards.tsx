@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { listInvoices, type Invoice } from '@/lib/services/invoices'
 import { listExpenses, type Expense } from '@/lib/services/expenses'
+import { filterExpenses, getTotalExpensesFromFiltered, DEFAULT_EXPENSE_FILTERS } from '@/lib/expense-filters'
 
 export function StatsCards() {
   const {
@@ -47,10 +48,9 @@ export function StatsCards() {
     .filter((inv) => inv.status === 'paid')
     .reduce((sum, inv) => sum + (inv.amount || 0), 0)
 
-  // Total Expenses: sum of paid expenses
-  const totalExpenses = expensesSafe
-    .filter((exp) => exp.status === 'paid')
-    .reduce((sum, exp) => sum + (exp.amount || 0), 0)
+  // Total Expenses: same calculation as Expenses page (same filters/date range logic, default = no filters)
+  const filteredExpenses = filterExpenses(expensesSafe, DEFAULT_EXPENSE_FILTERS)
+  const totalExpenses = getTotalExpensesFromFiltered(filteredExpenses)
 
   const netProfit = totalIncome - totalExpenses
 

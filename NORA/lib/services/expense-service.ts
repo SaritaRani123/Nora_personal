@@ -1,7 +1,7 @@
 /**
- * Expense form lookup services: categories and clients from backend API;
- * vendors, payment methods, currencies, tax rates, repeat frequencies are
- * local reference data (no backend endpoints). Expense CRUD is in lib/services/expenses.
+ * Expense form lookup services: categories, clients, and app config (payment methods,
+ * status options, defaults) from backend API. Vendors, currencies, tax rates, repeat
+ * frequencies remain local reference data. Expense CRUD is in lib/services/expenses.
  */
 import type {
   ExpenseCategory,
@@ -14,6 +14,7 @@ import type {
 } from '@/types/expense'
 import { apiFetch, extractArray } from '@/lib/api/http'
 import { listContacts, type Contact } from '@/lib/services/contacts'
+import { fetchConfig } from '@/lib/services/app-config'
 
 // ============ Category Service (backend API) ============
 
@@ -63,23 +64,19 @@ export function getClientById(id: string, contacts?: Client[]): Client | undefin
   return undefined
 }
 
-// ============ Payment Method Service (local reference data) ============
-
-const paymentMethodsData: PaymentMethod[] = [
-  { id: 'credit', name: 'Credit Card' },
-  { id: 'debit', name: 'Debit Card' },
-  { id: 'cash', name: 'Cash' },
-  { id: 'bank', name: 'Bank Transfer' },
-  { id: 'cheque', name: 'Cheque' },
-  { id: 'etransfer', name: 'E-Transfer' },
-]
+// ============ Payment Method Service (backend API via /config) ============
 
 export async function listPaymentMethods(): Promise<PaymentMethod[]> {
-  return Promise.resolve(paymentMethodsData)
+  const config = await fetchConfig()
+  return config.paymentMethods
 }
 
-export function getPaymentMethodById(id: string): PaymentMethod | undefined {
-  return paymentMethodsData.find(p => p.id === id)
+export async function getPaymentMethodById(id: string): Promise<PaymentMethod | undefined> {
+  const config = await fetchConfig()
+  const found = config.paymentMethods.find(p => p.id === id)
+  if (found) return found
+  const defaultMethod = config.paymentMethods.find(p => p.id === config.defaultPaymentMethodId)
+  return defaultMethod
 }
 
 // ============ Currency Service (local reference data) ============

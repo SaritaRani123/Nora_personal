@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
 import { format } from 'date-fns'
 import { CalendarIcon, Upload, Plus, Trash2, Loader2, ChevronDown } from 'lucide-react'
 import {
@@ -46,7 +47,6 @@ import {
   listTaxRates,
   listRepeatFrequencies,
   getVendorById,
-  getPaymentMethodById,
 } from '@/lib/services/expense-service'
 import type {
   ExpenseCategory,
@@ -60,6 +60,7 @@ import type {
   ExpenseUpdatePayload,
 } from '@/types/expense'
 import type { Expense as LegacyExpense } from '@/lib/services/expenses'
+import { fetchConfig } from '@/lib/services/app-config'
 
 // Helper function for case-insensitive alphabetical sorting
 const sortAlphabetically = <T extends { name?: string; label?: string; code?: string }>(items: T[]): T[] => {
@@ -70,15 +71,21 @@ const sortAlphabetically = <T extends { name?: string; label?: string; code?: st
   })
 }
 
-// Expense status options
-export const EXPENSE_STATUS_OPTIONS = [
+// Fallback when config not yet loaded (re-exported for expenses page compatibility)
+const FALLBACK_STATUS_OPTIONS = [
   { value: 'paid', label: 'Paid', color: 'bg-green-500/10 text-green-600 border-green-500/20' },
   { value: 'pending', label: 'Pending', color: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20' },
   { value: 'overdue', label: 'Overdue', color: 'bg-red-500/10 text-red-600 border-red-500/20' },
   { value: 'review', label: 'Needs Review', color: 'bg-blue-500/10 text-blue-600 border-blue-500/20' },
 ] as const
 
-export type ExpenseStatus = typeof EXPENSE_STATUS_OPTIONS[number]['value']
+export type ExpenseStatus = typeof FALLBACK_STATUS_OPTIONS[number]['value']
+
+/** Status options from backend config; use in ExpenseForm and expenses page. */
+export function useExpenseStatusOptions() {
+  const { data: config } = useSWR('config', fetchConfig)
+  return config?.expenseStatusOptions ?? [...FALLBACK_STATUS_OPTIONS]
+}
 
 interface ExpenseFormData {
   // General information
@@ -159,6 +166,9 @@ export function ExpenseForm({
   defaultDate,
   onSubmit,
 }: ExpenseFormProps) {
+  const { data: config } = useSWR('config', fetchConfig)
+  const statusOptions = useExpenseStatusOptions()
+
   const [formData, setFormData] = useState<ExpenseFormData>(initialFormData)
   const [useCustomVendor, setUseCustomVendor] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -278,12 +288,13 @@ export function ExpenseForm({
         setFormData({
           ...initialFormData,
           date: defaultDate || new Date(),
-          status: 'pending',
+          status: (config?.defaultExpenseStatus as ExpenseStatus) ?? 'pending',
+          paymentMethodId: config?.defaultPaymentMethodId ?? 'credit',
         })
         setUseCustomVendor(false)
       }
     }
-  }, [open, mode, expense, vendors, paymentMethods, defaultDate])
+  }, [open, mode, expense, vendors, paymentMethods, defaultDate, config])
 
   const handleSubmit = async () => {
     setIsSubmitting(true)
@@ -601,7 +612,7 @@ export function ExpenseForm({
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                     <SelectContent>
-                      {EXPENSE_STATUS_OPTIONS.map((option) => (
+                      {statusOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           <div className="flex items-center gap-2">
                             <div className={cn(

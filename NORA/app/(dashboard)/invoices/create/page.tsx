@@ -70,6 +70,7 @@ import { Switch } from '@/components/ui/switch'
 import useSWR, { mutate } from 'swr'
 import { listContacts, createContact, type Contact as ApiContact } from '@/lib/services/contacts'
 import { listInvoices, createInvoice, updateInvoice, type Invoice } from '@/lib/services/invoices'
+import { markWorkDoneAsInvoiced } from '@/lib/services/work-done'
 import { HttpError } from '@/lib/api/http'
 import { generateInvoicePDFFromPayload, type InvoicePDFPayload } from '@/lib/invoices/generateInvoicePDF'
 import InvoicePreview from './components/InvoicePreview'
@@ -176,8 +177,23 @@ function CreateInvoiceContent() {
 
   const isEditMode = searchParams.get('edit') === 'true'
   const editInvoiceId = searchParams.get('id')
-  const fromWorkIds: string[] = []
-  const fromWorkEntries: { contact?: string; description?: string; amount?: number; hours?: number; rate?: number }[] = []
+  const fromUnbilled = searchParams.get('from') === 'unbilled'
+
+  const [unbilledPreFill] = useState<Array<{ id: string; date: string; contact: string; description: string; hours: number; rate: number; amount: number }>>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const raw = sessionStorage.getItem('unbilledWorkEntriesForInvoice')
+      if (!raw) return []
+      const p = JSON.parse(raw)
+      return Array.isArray(p) ? p : []
+    } catch {
+      return []
+    }
+  })
+  const fromWorkEntries = fromUnbilled ? unbilledPreFill.map((w) => ({ contact: w.contact, description: w.description, amount: w.amount, hours: w.hours, rate: w.rate })) : []
+  const fromWorkIds = fromUnbilled ? unbilledPreFill.map((w) => w.id) : []
+  const unbilledIdsRef = useRef<string[]>(fromWorkIds)
+  unbilledIdsRef.current = fromWorkIds
 
   // Step management
   const [currentStep, setCurrentStep] = useState<Step>('form')
@@ -894,8 +910,16 @@ function CreateInvoiceContent() {
       lineItems,
     }
 
-    await createInvoice(newInvoiceData)
+    const created = await createInvoice(newInvoiceData)
     await mutate('invoices')
+    const newInvoiceId = created[0]?.id ?? newInvoiceData.id
+    if (unbilledIdsRef.current.length > 0 && newInvoiceId) {
+      await markWorkDoneAsInvoiced(unbilledIdsRef.current, newInvoiceId)
+      try {
+        sessionStorage.removeItem('unbilledWorkEntriesForInvoice')
+      } catch (_) {}
+      await mutate('work-done-unbilled')
+    }
     setIsSending(false)
     setIsSendModalOpen(false)
   }
@@ -942,8 +966,16 @@ function CreateInvoiceContent() {
         }
         await mutate('invoices')
       } else {
-        await createInvoice(invoiceData)
+        const created = await createInvoice(invoiceData)
         await mutate('invoices')
+        const newInvoiceId = created[0]?.id ?? invoiceData.id
+        if (unbilledIdsRef.current.length > 0 && newInvoiceId) {
+          await markWorkDoneAsInvoiced(unbilledIdsRef.current, newInvoiceId)
+          try {
+            sessionStorage.removeItem('unbilledWorkEntriesForInvoice')
+          } catch (_) {}
+          await mutate('work-done-unbilled')
+        }
       }
       router.push('/invoices')
     } catch (e) {

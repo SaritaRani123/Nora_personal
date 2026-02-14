@@ -108,57 +108,60 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
 import { useToast } from '@/hooks/use-toast'
-import { useDataStore } from '@/lib/data-store'
-import { getPaymentMethodById } from '@/lib/services/expense-service'
+import { listWorkDone, createWorkDone, deleteWorkDone, type WorkDoneEntry } from '@/lib/services/work-done'
+import { getPaymentMethodById, listExpenseCategories } from '@/lib/services/expense-service'
 import type { ExpenseCreatePayload, ExpenseUpdatePayload } from '@/types/expense'
 
 import { listInvoices, type Invoice } from '@/lib/services/invoices'
-import { listContacts } from '@/lib/services/contacts'
+import { listContacts, createContact, type Contact } from '@/lib/services/contacts'
+import { fetchCalendarSummary } from '@/lib/services/calendar-summary'
+import { fetchCalendarConfig, type CalendarEntryType } from '@/lib/services/calendar-config'
+import { fetchConfig } from '@/lib/services/app-config'
+import { fetchPaymentMethods } from '@/lib/services/payment-methods'
 
-const eventTypeConfig = {
-  work: { label: 'Work Done', icon: Briefcase, color: 'bg-primary text-primary-foreground', dotColor: 'bg-primary' },
-  time: { label: 'Time', icon: Clock, color: 'bg-chart-3 text-chart-3-foreground', dotColor: 'bg-chart-3' },
-  expense: { label: 'Expense', icon: Receipt, color: 'bg-destructive/90 text-destructive-foreground', dotColor: 'bg-destructive' },
-  income: { label: 'Income', icon: DollarSign, color: 'bg-success text-success-foreground', dotColor: 'bg-success' },
-  invoice: { label: 'Invoice', icon: FileCheck, color: 'bg-chart-2 text-white', dotColor: 'bg-chart-2' },
-  meeting: { label: 'Meeting', icon: Users, color: 'bg-chart-4 text-chart-4-foreground', dotColor: 'bg-chart-4' },
-  travel: { label: 'Travels', icon: Car, color: 'bg-chart-5 text-chart-5-foreground', dotColor: 'bg-chart-5' },
-  note: { label: 'Note', icon: FileText, color: 'bg-muted text-muted-foreground', dotColor: 'bg-muted-foreground' },
-  tax: { label: 'Tax', icon: Landmark, color: 'bg-orange-500 text-white', dotColor: 'bg-orange-500' },
-  overdue: { label: 'Overdue', icon: AlertTriangle, color: 'bg-destructive text-destructive-foreground', dotColor: 'bg-destructive' },
-  }
+/** Map backend iconKey to Lucide icon component. List of types comes from backend; only mapping lives here. */
+const ICON_MAP: Record<string, typeof Briefcase> = {
+  briefcase: Briefcase,
+  clock: Clock,
+  receipt: Receipt,
+  dollarSign: DollarSign,
+  fileCheck: FileCheck,
+  users: Users,
+  car: Car,
+  fileText: FileText,
+  landmark: Landmark,
+  alertTriangle: AlertTriangle,
+}
+/** Map backend colorKey to Tailwind classes. */
+const COLOR_MAP: Record<string, { color: string; dotColor: string }> = {
+  primary: { color: 'bg-primary text-primary-foreground', dotColor: 'bg-primary' },
+  chart3: { color: 'bg-chart-3 text-chart-3-foreground', dotColor: 'bg-chart-3' },
+  destructive: { color: 'bg-destructive/90 text-destructive-foreground', dotColor: 'bg-destructive' },
+  success: { color: 'bg-success text-success-foreground', dotColor: 'bg-success' },
+  chart2: { color: 'bg-chart-2 text-white', dotColor: 'bg-chart-2' },
+  chart4: { color: 'bg-chart-4 text-chart-4-foreground', dotColor: 'bg-chart-4' },
+  chart5: { color: 'bg-chart-5 text-chart-5-foreground', dotColor: 'bg-chart-5' },
+  muted: { color: 'bg-muted text-muted-foreground', dotColor: 'bg-muted-foreground' },
+  orange: { color: 'bg-orange-500 text-white', dotColor: 'bg-orange-500' },
+}
+const DEFAULT_DISPLAY = { icon: FileText, color: 'bg-muted text-muted-foreground', dotColor: 'bg-muted-foreground' }
+
+function getEventTypeDisplay(entryTypes: CalendarEntryType[], typeId: string): { icon: typeof Briefcase; color: string; dotColor: string } {
+  const t = entryTypes.find((e) => e.id === typeId)
+  if (!t) return DEFAULT_DISPLAY
+  const icon = ICON_MAP[t.iconKey] ?? DEFAULT_DISPLAY.icon
+  const colors = COLOR_MAP[t.colorKey] ?? { color: DEFAULT_DISPLAY.color, dotColor: DEFAULT_DISPLAY.dotColor }
+  return { icon, color: colors.color, dotColor: colors.dotColor }
+}
+
+function getEntryTypeLabel(entryTypes: CalendarEntryType[], typeId: string): string {
+  return entryTypes.find((t) => t.id === typeId)?.label ?? typeId
+}
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
-]
-
-// Filter options
-const CATEGORIES = [
-  { id: 'office', label: 'Office Expenses', icon: Building2 },
-  { id: 'software', label: 'Software', icon: Zap },
-  { id: 'food', label: 'Food & Dining', icon: Utensils },
-  { id: 'travel', label: 'Travel', icon: Plane },
-  { id: 'rent', label: 'Rent', icon: Home },
-  { id: 'marketing', label: 'Marketing', icon: Briefcase },
-  { id: 'supplies', label: 'Supplies', icon: ShoppingBag },
-]
-
-const CLIENTS = [
-  { id: 'abc', label: 'ABC Corporation' },
-  { id: 'xyz', label: 'XYZ Ltd' },
-  { id: 'tech', label: 'Tech Innovations' },
-  { id: 'startup', label: 'StartUp Ventures' },
-  { id: 'global', label: 'Global Services' },
-]
-
-const PAYMENT_METHODS = [
-  { id: 'credit', label: 'Credit Card' },
-  { id: 'debit', label: 'Debit Card' },
-  { id: 'cash', label: 'Cash' },
-  { id: 'bank', label: 'Bank Transfer' },
-  { id: 'paypal', label: 'PayPal' },
 ]
 
 // Helper function for case-insensitive alphabetical sorting
@@ -203,28 +206,15 @@ const upcomingTypeConfig = {
   expense: { label: 'Expense', icon: Receipt, color: 'text-destructive' },
 }
 
-// Helper function to get category name from category id
-const getCategoryName = (categoryId: string): string => {
-  const cat = CATEGORIES.find(c => c.id === categoryId)
-  return cat?.label || categoryId
-}
-
-// Helper function to normalize payment method for calendar display
-const normalizePaymentMethod = (method: string): string => {
-  const normalizedMap: Record<string, string> = {
-    'Credit Card': 'credit',
-    'Debit Card': 'debit',
-    'Bank Transfer': 'bank',
-    'Cash': 'cash',
-    'PayPal': 'paypal',
-  }
-  return normalizedMap[method] || method.toLowerCase()
+// Helper: get category display name from id (uses categories from API)
+function getCategoryName(categories: { id: string; name: string }[], categoryId: string): string {
+  const cat = categories.find((c) => c.id === categoryId)
+  return cat?.name ?? categoryId
 }
 
 export default function CalendarPage() {
   const { toast } = useToast()
-  const { addWorkDoneEntry } = useDataStore()
-  
+
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(() => new Date())
   const [isAddEventOpen, setIsAddEventOpen] = useState(false)
@@ -289,6 +279,52 @@ export default function CalendarPage() {
   // Fetch invoices and income from backend
   const { data: invoicesData, error: invoicesError, isLoading: invoicesLoading } = useSWR<Invoice[]>('invoices', listInvoices)
 
+  // Fetch work-done entries for calendar view range (from backend)
+  const workDoneFetcher = useCallback(
+    () => listWorkDone({ from: viewStartDate, to: viewEndDate }),
+    [viewStartDate, viewEndDate]
+  )
+  const { data: workDoneList = [], mutate: mutateWorkDone } = useSWR<WorkDoneEntry[]>(
+    `work-done-${viewStartDate}-${viewEndDate}`,
+    workDoneFetcher
+  )
+
+  // Calendar summary (Work, Expenses, Income, Net) from backend for current view range
+  const calendarSummaryFetcher = useCallback(
+    () => fetchCalendarSummary(viewStartDate, viewEndDate),
+    [viewStartDate, viewEndDate]
+  )
+  const { data: calendarSummary, mutate: mutateCalendarSummary } = useSWR(
+    `calendar-summary-${viewStartDate}-${viewEndDate}`,
+    calendarSummaryFetcher
+  )
+
+  const { data: calendarConfig } = useSWR('calendar-config', fetchCalendarConfig)
+  const entryTypes: CalendarEntryType[] = calendarConfig?.entryTypes ?? []
+
+  const { data: categories = [] } = useSWR('categories', listExpenseCategories)
+  const { data: appConfig } = useSWR('config', fetchConfig)
+  const defaultCategoryId = useMemo(() => {
+    if (appConfig?.defaultCategoryId && categories.some((c) => c.id === appConfig.defaultCategoryId))
+      return appConfig.defaultCategoryId
+    return categories[0]?.id ?? ''
+  }, [appConfig?.defaultCategoryId, categories])
+
+  const { data: paymentMethodsData } = useSWR('payment-methods', fetchPaymentMethods)
+  const paymentMethods = paymentMethodsData?.paymentMethods ?? []
+  const defaultPaymentMethodId = paymentMethodsData?.defaultPaymentMethodId ?? paymentMethods[0]?.id ?? ''
+  const defaultPaymentMethodName = useMemo(
+    () => paymentMethods.find((p) => p.id === defaultPaymentMethodId)?.name ?? paymentMethods[0]?.name ?? '',
+    [paymentMethods, defaultPaymentMethodId]
+  )
+
+  const calendarYears = useMemo(() => {
+    const min = appConfig?.calendarMinYear ?? 2020
+    const max = appConfig?.calendarMaxYear ?? 2030
+    const size = Math.max(0, max - min + 1)
+    return Array.from({ length: size }, (_, i) => min + i)
+  }, [appConfig?.calendarMinYear, appConfig?.calendarMaxYear])
+
   const isLoading = expensesLoading || invoicesLoading
   const hasError = expensesError || invoicesError
 
@@ -336,39 +372,54 @@ export default function CalendarPage() {
       }
     })
 
-    // Add local events (meetings, work, travel added via calendar UI)
+    // Map work-done from backend to calendar events (same date as saved)
+    workDoneList.forEach((w) => {
+      events.push({
+        id: w.id,
+        title: w.description || 'Work Done',
+        date: w.date,
+        type: 'work',
+        amount: w.amount,
+        client: w.contact || undefined,
+        hours: w.hours,
+      })
+    })
+
+    // Add local events (meetings, travel, note, etc. - not work; work comes from API)
     events.push(...localEvents)
 
     return events
-  }, [expenses, invoices, localEvents, isLoading])
+  }, [expenses, invoices, workDoneList, localEvents, isLoading])
 
   // State for adding new client inline
   const [isAddingClient, setIsAddingClient] = useState(false)
   const [isAddingClientInEdit, setIsAddingClientInEdit] = useState(false)
   const [newClientName, setNewClientName] = useState('')
-  
-  // Local contacts state (in production, this would come from /api/contacts)
-  const [contacts, setContacts] = useState([
-    { id: '1', name: 'ABC Corporation' },
-    { id: '2', name: 'XYZ Ltd' },
-    { id: '3', name: 'Tech Innovations Inc' },
-    { id: '4', name: 'Global Services Co' },
-    { id: '5', name: 'StartUp Ventures' },
-  ])
-  
-  // Add contact handler (local state management)
-  const addContact = (contact: { name: string }) => {
-    const newContact = { id: `contact-${Date.now()}`, name: contact.name }
-    setContacts(prev => [...prev, newContact])
-  }
-  
-// Advanced filter state
-const [filters, setFilters] = useState<FilterState>({
-  types: ['work', 'time', 'expense', 'income', 'invoice', 'meeting', 'travel', 'note', 'tax'],
-  categories: [],
-  clients: [],
-  paymentMethods: [],
-  taxDeductible: null,
+
+  // Contacts from Contacts page (backend API)
+  const { data: contacts = [], mutate: mutateContacts } = useSWR<Contact[]>('contacts', listContacts)
+  const clientsForFilter = useMemo(() => contacts.map((c) => ({ id: c.id, label: c.name })), [contacts])
+
+  const addContact = useCallback(
+    async (contact: { name: string; email?: string }) => {
+      try {
+        await createContact({ name: contact.name, email: contact.email ?? '' })
+        await mutateContacts()
+        return contact.name
+      } catch {
+        return null
+      }
+    },
+    [mutateContacts]
+  )
+
+  // Advanced filter state (types filled from calendar config when loaded)
+  const [filters, setFilters] = useState<FilterState>({
+    types: [],
+    categories: [],
+    clients: [],
+    paymentMethods: [],
+    taxDeductible: null,
   })
   const [isFilterOpen, setIsFilterOpen] = useState(false)
 
@@ -398,18 +449,27 @@ const [newEntry, setNewEntry] = useState({
   amount: '',
   hours: '',
   kilometers: '',
+  kmRate: '',
   category: '',
   notes: '',
   repeat: false,
-  paymentMethod: 'Credit Card',
+  paymentMethod: '',
   taxDeductible: false,
   startTime: '',
   endTime: '',
   vendor: '',
   })
 
-  const [activeFilters, setActiveFilters] = useState(['work', 'time', 'expense', 'income', 'invoice', 'meeting', 'travel', 'note', 'tax'])
-  
+  const [activeFilters, setActiveFilters] = useState<string[]>([])
+
+  useEffect(() => {
+    if (entryTypes.length > 0 && filters.types.length === 0) {
+      const typeIds = entryTypes.map((t) => t.id)
+      setFilters((prev) => ({ ...prev, types: typeIds }))
+      setActiveFilters(typeIds)
+    }
+  }, [entryTypes.length])
+
   // Mobile/responsive state
   const [isMobile, setIsMobile] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -480,8 +540,8 @@ const [newEntry, setNewEntry] = useState({
   const getEventsForDate = (date: Date) => {
     const dateStr = formatDateToLocal(date)
     return calendarEvents.filter((event) => {
-      // Type filter
-      if (!filters.types.includes(event.type)) return false
+      // Type filter (empty = all types)
+      if (filters.types.length > 0 && !filters.types.includes(event.type)) return false
       
       // Category filter (if categories selected)
       if (filters.categories.length > 0 && event.category) {
@@ -493,15 +553,16 @@ const [newEntry, setNewEntry] = useState({
       
       // Client filter (if clients selected)
       if (filters.clients.length > 0 && event.client) {
-        const clientMatch = filters.clients.some(client => 
-          CLIENTS.find(c => c.id === client)?.label === event.client
+        const clientMatch = filters.clients.some((client) =>
+          clientsForFilter.find((c) => c.id === client)?.label === event.client
         )
         if (!clientMatch) return false
       }
       
-      // Payment method filter
+      // Payment method filter (filters store ids; event.paymentMethod is name from API)
       if (filters.paymentMethods.length > 0 && event.paymentMethod) {
-        if (!filters.paymentMethods.includes(event.paymentMethod)) return false
+        const eventMethodId = paymentMethods.find((p) => p.name === event.paymentMethod)?.id
+        if (!eventMethodId || !filters.paymentMethods.includes(eventMethodId)) return false
       }
       
       // Tax deductible filter
@@ -512,8 +573,6 @@ const [newEntry, setNewEntry] = useState({
       return event.date === dateStr
     })
   }
-
-  const selectedDateEvents = selectedDate ? getEventsForDate(selectedDate) : []
 
   // Get events for agenda view (next 14 days)
   const agendaEvents = useMemo(() => {
@@ -529,20 +588,6 @@ const [newEntry, setNewEntry] = useState({
     }
     return events
   }, [calendarEvents, filters])
-
-  const monthStats = useMemo(() => {
-  const monthEvents = calendarEvents.filter((event) => {
-    const eventDate = parseDateString(event.date)
-    return eventDate.getMonth() === month && eventDate.getFullYear() === year
-  })
-
-    return {
-      workDone: monthEvents.filter((e) => e.type === 'work').reduce((sum, e) => sum + (e.amount || 0), 0),
-      expenses: monthEvents.filter((e) => e.type === 'expense').reduce((sum, e) => sum + (e.amount || 0), 0),
-      income: monthEvents.filter((e) => e.type === 'income').reduce((sum, e) => sum + (e.amount || 0), 0),
-      hoursWorked: monthEvents.filter((e) => e.type === 'work').reduce((sum, e) => sum + (e.hours || 0), 0),
-    }
-  }, [month, year, calendarEvents])
 
   // Calculate insights based on filtered events
   const insights = useMemo(() => {
@@ -669,8 +714,10 @@ if (event.type === 'expense' && event.amount) {
   }
 
   const goToToday = () => {
-    setCurrentDate(new Date())
-    setSelectedDate(new Date())
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    setCurrentDate(today)
+    setSelectedDate(today)
   }
 
   const isToday = (date: Date) => {
@@ -715,17 +762,19 @@ if (event.type === 'expense' && event.amount) {
   }
 
 const resetFilters = () => {
+  const typeIds = entryTypes.length > 0 ? entryTypes.map((t) => t.id) : []
   setFilters({
-  types: ['work', 'time', 'expense', 'income', 'invoice', 'meeting', 'travel', 'note', 'tax'],
-  categories: [],
-  clients: [],
-  paymentMethods: [],
-  taxDeductible: null,
+    types: typeIds,
+    categories: [],
+    clients: [],
+    paymentMethods: [],
+    taxDeductible: null,
   })
+  setActiveFilters(typeIds)
   }
 
 const activeFilterCount =
-  (filters.types.length < 9 ? 1 : 0) +
+  (entryTypes.length > 0 && filters.types.length < entryTypes.length ? 1 : 0) +
   (filters.categories.length > 0 ? 1 : 0) +
   (filters.clients.length > 0 ? 1 : 0) +
   (filters.paymentMethods.length > 0 ? 1 : 0) +
@@ -743,9 +792,9 @@ const handleAddEntry = async () => {
       const expensePayload = {
         date: eventDate,
         description: newEntry.title || 'Expense',
-        category: newEntry.category || 'other',
+        category: newEntry.category || defaultCategoryId,
         amount: newEntry.amount ? parseFloat(newEntry.amount) : 0,
-        paymentMethod: newEntry.paymentMethod || 'Credit Card',
+        paymentMethod: newEntry.paymentMethod || defaultPaymentMethodName,
         source: 'calendar' as const,
       }
       
@@ -754,6 +803,7 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutateCalendarSummary()
         toast({
           title: 'Expense added',
           description: `Added expense for $${expensePayload.amount.toFixed(2)}`,
@@ -768,7 +818,8 @@ const handleAddEntry = async () => {
     }
     // Handle travel type - use the expenses API with travel category
     else if (newEntry.type === 'travel') {
-      const kmRate = 0.58 // Default rate per km
+      const defaultKm = calendarConfig?.defaultKmRate ?? 0.58
+      const kmRate = newEntry.kmRate !== '' && !Number.isNaN(parseFloat(newEntry.kmRate)) ? parseFloat(newEntry.kmRate) : defaultKm
       const distance = newEntry.kilometers ? parseFloat(newEntry.kilometers) : 0
       const calculatedAmount = newEntry.amount ? parseFloat(newEntry.amount) : distance * kmRate
       
@@ -777,7 +828,7 @@ const handleAddEntry = async () => {
         description: newEntry.title || 'Travel',
         category: 'travel',
         amount: calculatedAmount,
-        paymentMethod: newEntry.paymentMethod || 'Credit Card',
+        paymentMethod: newEntry.paymentMethod || defaultPaymentMethodName,
         source: 'calendar' as const,
       }
       
@@ -786,6 +837,7 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutateCalendarSummary()
         toast({
           title: 'Travel expense added',
           description: `Added travel expense for $${expensePayload.amount.toFixed(2)}`,
@@ -814,7 +866,35 @@ const handleAddEntry = async () => {
         description: `Added to calendar (local only)`,
       })
     }
-    // Handle other entry types (work, time, meeting, note) as local events
+    // Handle work: persist to backend only (no localEvents); appears via refetch
+    else if (newEntry.type === 'work') {
+      const hours = newEntry.hours ? parseFloat(newEntry.hours) : 0
+      const rate = newEntry.amount ? parseFloat(newEntry.amount) : 0
+      const amount = hours * rate
+      try {
+        await createWorkDone({
+          date: eventDate,
+          contact: newEntry.client || '',
+          description: newEntry.title || 'Work Done',
+          hours,
+          rate,
+          amount,
+        })
+        await mutateWorkDone()
+        mutateCalendarSummary()
+        toast({
+          title: 'Work done added',
+          description: 'Saved to calendar and available under Invoices → Unbilled Work',
+        })
+      } catch (e) {
+        toast({
+          title: 'Failed to save work done',
+          description: e instanceof Error ? e.message : 'Please try again.',
+          variant: 'destructive',
+        })
+      }
+    }
+    // Handle other entry types (time, meeting, note) as local events
     else {
       const newEvent: CalendarEvent = {
         id: `local-${Date.now()}`,
@@ -826,27 +906,11 @@ const handleAddEntry = async () => {
         client: newEntry.client || undefined,
         category: newEntry.category || undefined,
         kilometers: newEntry.kilometers ? parseFloat(newEntry.kilometers) : undefined,
-        paymentMethod: newEntry.paymentMethod || undefined,
+        paymentMethod: newEntry.paymentMethod || defaultPaymentMethodName || undefined,
         taxDeductible: newEntry.taxDeductible,
         notes: newEntry.notes || undefined,
       }
       setLocalEvents((prev) => [...prev, newEvent])
-
-      // Also persist "work" entries to the shared data store for invoice linking
-      if (newEntry.type === 'work') {
-        const hours = newEntry.hours ? parseFloat(newEntry.hours) : 0
-        const rate = newEntry.amount ? parseFloat(newEntry.amount) : 0
-        addWorkDoneEntry({
-          date: eventDate,
-          contact: newEntry.client || '',
-          description: newEntry.title || 'Work Done',
-          hours,
-          rate,
-          amount: hours * rate,
-          invoiceId: null,
-        })
-      }
-
       toast({
         title: 'Entry added',
         description: `Added ${newEntry.type} entry to calendar`,
@@ -865,10 +929,11 @@ const handleAddEntry = async () => {
       amount: '',
       hours: '',
       kilometers: '',
-      category: '',
+      kmRate: '',
+      category: defaultCategoryId,
       notes: '',
       repeat: false,
-      paymentMethod: 'Credit Card',
+      paymentMethod: defaultPaymentMethodName,
       taxDeductible: false,
       startTime: '',
       endTime: '',
@@ -924,8 +989,8 @@ const handleAddEntry = async () => {
     // Normalize category to ID format for the Select component
     let normalizedCategory = event.category
     if (normalizedCategory) {
-      const matchedCat = CATEGORIES.find(c => 
-        c.label.toLowerCase() === normalizedCategory?.toLowerCase() || 
+      const matchedCat = categories.find(c => 
+        c.name?.toLowerCase() === normalizedCategory?.toLowerCase() ||
         c.id === normalizedCategory?.toLowerCase()
       )
       if (matchedCat) {
@@ -944,21 +1009,17 @@ const handleAddEntry = async () => {
       if (eventId.startsWith('expense-')) {
         const originalExpenseId = eventId.replace('expense-', '')
         
-        // Get human-readable payment method
-        const paymentMethodMap: Record<string, string> = {
-          credit: 'Credit Card',
-          debit: 'Debit Card',
-          bank: 'Bank Transfer',
-          cash: 'Cash',
-          paypal: 'PayPal',
-        }
-        
+        const idToName = Object.fromEntries(paymentMethods.map((p) => [p.id, p.name]))
+        const paymentMethodName =
+          idToName[editingEvent.paymentMethod ?? ''] ??
+          editingEvent.paymentMethod ??
+          defaultPaymentMethodName
         const expenseUpdate = {
           date: editingEvent.date,
           description: editingEvent.title,
-          category: editingEvent.category || 'office',
+          category: editingEvent.category || defaultCategoryId,
           amount: editingEvent.amount || 0,
-          paymentMethod: paymentMethodMap[editingEvent.paymentMethod || ''] || editingEvent.paymentMethod || 'Credit Card',
+          paymentMethod: paymentMethodName,
         }
         
         try {
@@ -966,6 +1027,7 @@ const handleAddEntry = async () => {
           // Revalidate expenses cache
           mutate(`expenses-${viewStartDate}-${viewEndDate}`)
           mutate('expenses')
+          mutateCalendarSummary()
         } catch (error) {
           toast({
             title: 'Error',
@@ -989,27 +1051,39 @@ const handleAddEntry = async () => {
   }
 
   const handleDeleteEvent = async (eventId: string) => {
-    // Handle expense events - call API
-    if (eventId.startsWith('expense-')) {
-      const originalExpenseId = eventId.replace('expense-', '')
-      try {
+    try {
+      if (eventId.startsWith('expense-')) {
+        const originalExpenseId = eventId.replace('expense-', '')
         await deleteExpenseAPI(originalExpenseId)
-        // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
-      } catch (error) {
+        mutateCalendarSummary()
+        toast({ title: 'Entry deleted', description: 'Expense removed.' })
+      } else if (eventId.startsWith('work-')) {
+        await deleteWorkDone(eventId)
+        await mutateWorkDone()
+        mutateCalendarSummary()
+        toast({ title: 'Entry deleted', description: 'Work done entry removed.' })
+      } else if (eventId.startsWith('local-')) {
+        setLocalEvents((prev) => prev.filter((e) => e.id !== eventId))
+        toast({ title: 'Entry deleted', description: 'Entry removed.' })
+      } else {
+        // invoice / income: read-only from calendar
         toast({
-          title: 'Error',
-          description: 'Failed to delete expense',
+          title: 'Cannot delete',
+          description: 'Invoices and income are managed from the Invoices page.',
           variant: 'destructive',
         })
+        return
       }
-    } else if (eventId.startsWith('local-')) {
-      // Handle local events
-      setLocalEvents((prev) => prev.filter((e) => e.id !== eventId))
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to delete entry',
+        variant: 'destructive',
+      })
+      return
     }
-    // Note: invoice and income events are read-only from this view
-    
     setIsEditSheetOpen(false)
     setEditingEvent(null)
     setIsAddingClientInEdit(false)
@@ -1054,14 +1128,14 @@ const handleAddEntry = async () => {
   // Handle ExpenseForm submission
   const handleExpenseFormSubmit = async (data: ExpenseCreatePayload | ExpenseUpdatePayload) => {
     try {
-      const paymentMethod = getPaymentMethodById((data as ExpenseCreatePayload).paymentMethodId)
+      const paymentMethod = await getPaymentMethodById((data as ExpenseCreatePayload).paymentMethodId)
       
       const apiData = {
         date: data.date || '',
         description: data.description || '',
         category: (data as ExpenseCreatePayload).categoryId || '',
         amount: data.amount || 0,
-        paymentMethod: paymentMethod?.name || 'Credit Card',
+        paymentMethod: paymentMethod?.name || defaultPaymentMethodName,
         status: (data as ExpenseCreatePayload).isPaid ? 'paid' : 'pending',
         source: 'calendar' as const,
       }
@@ -1071,6 +1145,7 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutateCalendarSummary()
         toast({
           title: 'Expense added',
           description: `Added expense for $${apiData.amount.toFixed(2)} on ${apiData.date}`,
@@ -1080,6 +1155,7 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutateCalendarSummary()
         toast({
           title: 'Expense updated',
           description: 'Successfully updated expense details',
@@ -1166,7 +1242,7 @@ const handleAddEntry = async () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Array.from({ length: 21 }, (_, i) => 2020 + i).map((y) => (
+                    {calendarYears.map((y) => (
                       <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1187,7 +1263,7 @@ const handleAddEntry = async () => {
             </Button>
           </div>
 
-          {/* Center: Inline Stats - Hidden on mobile/tablet */}
+          {/* Center: Inline Stats - Hidden on mobile/tablet (from backend API) */}
           <div className="hidden items-center gap-4 xl:flex">
             <div className="flex items-center gap-2">
               <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/20">
@@ -1195,7 +1271,7 @@ const handleAddEntry = async () => {
               </div>
               <div className="text-sm">
                 <span className="text-muted-foreground">Work:</span>{' '}
-                <span className="font-medium">${monthStats.workDone.toLocaleString()}</span>
+                <span className="font-medium">${(calendarSummary?.workDone ?? 0).toLocaleString()}</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -1204,7 +1280,7 @@ const handleAddEntry = async () => {
               </div>
               <div className="text-sm">
                 <span className="text-muted-foreground">Expenses:</span>{' '}
-                <span className="font-medium">${monthStats.expenses.toLocaleString()}</span>
+                <span className="font-medium">${(calendarSummary?.expenses ?? 0).toLocaleString()}</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -1213,7 +1289,7 @@ const handleAddEntry = async () => {
               </div>
               <div className="text-sm">
                 <span className="text-muted-foreground">Income:</span>{' '}
-                <span className="font-medium">${monthStats.income.toLocaleString()}</span>
+                <span className="font-medium">${(calendarSummary?.income ?? 0).toLocaleString()}</span>
               </div>
             </div>
             <Tooltip>
@@ -1223,7 +1299,7 @@ const handleAddEntry = async () => {
                   <div className="text-sm">
                     <span className="text-muted-foreground">Net:</span>{' '}
                     <span className="font-semibold text-success">
-                      ${(monthStats.workDone + monthStats.income - monthStats.expenses).toLocaleString()}
+                      ${(calendarSummary?.net ?? 0).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -1255,8 +1331,8 @@ const handleAddEntry = async () => {
                     </div>
                     <span className="text-xs text-muted-foreground">Work Done</span>
                   </div>
-                  <p className="mt-2 text-xl font-bold">${monthStats.workDone.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground">{monthStats.hoursWorked}h logged</p>
+                  <p className="mt-2 text-xl font-bold">${(calendarSummary?.workDone ?? 0).toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">{(calendarSummary?.hoursWorked ?? 0)}h logged</p>
                 </div>
                 <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
                   <div className="flex items-center gap-2">
@@ -1265,7 +1341,7 @@ const handleAddEntry = async () => {
                     </div>
                     <span className="text-xs text-muted-foreground">Expenses</span>
                   </div>
-                  <p className="mt-2 text-xl font-bold">${monthStats.expenses.toLocaleString()}</p>
+                  <p className="mt-2 text-xl font-bold">${(calendarSummary?.expenses ?? 0).toLocaleString()}</p>
                 </div>
                 <div className="rounded-lg border border-success/20 bg-success/5 p-4">
                   <div className="flex items-center gap-2">
@@ -1274,7 +1350,7 @@ const handleAddEntry = async () => {
                     </div>
                     <span className="text-xs text-muted-foreground">Income</span>
                   </div>
-                  <p className="mt-2 text-xl font-bold">${monthStats.income.toLocaleString()}</p>
+                  <p className="mt-2 text-xl font-bold">${(calendarSummary?.income ?? 0).toLocaleString()}</p>
                 </div>
                 <div className="rounded-lg border border-chart-2/20 bg-chart-2/5 p-4">
                   <div className="flex items-center gap-2">
@@ -1284,40 +1360,39 @@ const handleAddEntry = async () => {
                     <span className="text-xs text-muted-foreground">Net</span>
                   </div>
                   <p className="mt-2 text-xl font-bold text-success">
-                    ${(monthStats.workDone + monthStats.income - monthStats.expenses).toLocaleString()}
+                    ${(calendarSummary?.net ?? 0).toLocaleString()}
                   </p>
                 </div>
               </div>
-              {/* Quick Add in Sheet */}
+              {/* Quick Add in Sheet - from backend /calendar/config only */}
               <div className="border-t border-border pt-4">
                 <p className="mb-3 text-sm font-medium">Quick Add</p>
                 <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { type: 'work', icon: Clock, label: 'Work' },
-                    { type: 'expense', icon: Receipt, label: 'Expense' },
-                    { type: 'travel', icon: Car, label: 'Travel' },
-                    { type: 'meeting', icon: Users, label: 'Meeting' },
-                  ].map((item) => {
-                    const config = eventTypeConfig[item.type as keyof typeof eventTypeConfig]
+                  {entryTypes.map((t) => {
+                    const display = getEventTypeDisplay(entryTypes, t.id)
+                    const Icon = display.icon
                     return (
                       <Button
-                        key={item.type}
+                        key={t.id}
                         variant="outline"
                         className="h-auto flex-col gap-1 bg-transparent py-3"
-onClick={() => {
-  setIsStatsOpen(false)
-  if (item.type === 'expense') {
-    handleOpenExpenseForm(selectedDate || new Date())
-  } else {
-    setNewEntry({ ...newEntry, type: item.type })
-    setIsAddEventOpen(true)
-  }
-  }}
+                        onClick={() => {
+                          setIsStatsOpen(false)
+                          if (t.id === 'expense') {
+                            handleOpenExpenseForm(selectedDate || new Date())
+                          } else {
+                            const next = { ...newEntry, type: t.id }
+                            if (t.id === 'time' && next.amount === '') next.amount = String(calendarConfig?.defaultHourlyRate ?? 75)
+                            if (t.id === 'travel' && next.kmRate === '') next.kmRate = String(calendarConfig?.defaultKmRate ?? 0.58)
+                            setNewEntry(next)
+                            setIsAddEventOpen(true)
+                          }
+                        }}
                       >
-                        <div className={`rounded p-1.5 ${config.color}`}>
-                          <item.icon className="h-4 w-4" />
+                        <div className={`rounded p-1.5 ${display.color}`}>
+                          <Icon className="h-4 w-4" />
                         </div>
-                        <span className="text-xs">{item.label}</span>
+                        <span className="text-xs">{t.label}</span>
                       </Button>
                     )
                   })}
@@ -1367,25 +1442,28 @@ onClick={() => {
               </div>
               <ScrollArea className="h-[400px]">
                 <div className="p-4 space-y-4">
-                  {/* Entry Types */}
+                  {/* Entry Types - from backend /calendar/config */}
                   <div>
                     <h5 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Entry Type</h5>
                     <div className="grid grid-cols-2 gap-2">
-                      {Object.entries(eventTypeConfig).map(([key, config]) => (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => toggleTypeFilter(key)}
-                          className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
-                            filters.types.includes(key)
-                              ? 'border-primary bg-primary/10 text-foreground'
-                              : 'border-border bg-transparent text-muted-foreground hover:border-primary/50'
-                          }`}
-                        >
-                          <div className={`h-2 w-2 rounded-full ${config.dotColor}`} />
-                          {config.label}
-                        </button>
-                      ))}
+                      {entryTypes.map((t) => {
+                        const display = getEventTypeDisplay(entryTypes, t.id)
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => toggleTypeFilter(t.id)}
+                            className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
+                              filters.types.includes(t.id)
+                                ? 'border-primary bg-primary/10 text-foreground'
+                                : 'border-border bg-transparent text-muted-foreground hover:border-primary/50'
+                            }`}
+                          >
+                            <div className={`h-2 w-2 rounded-full ${display.dotColor}`} />
+                            {t.label}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
 
@@ -1395,7 +1473,7 @@ onClick={() => {
                   <div>
                     <h5 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Category</h5>
                     <div className="space-y-1">
-                      {CATEGORIES.map((cat) => (
+                      {categories.map((cat) => (
                         <button
                           key={cat.id}
                           type="button"
@@ -1406,8 +1484,8 @@ onClick={() => {
                               : 'text-muted-foreground hover:bg-accent/50'
                           }`}
                         >
-                          <cat.icon className="h-3.5 w-3.5" />
-                          {cat.label}
+                          <Receipt className="h-3.5 w-3.5 shrink-0" />
+                          {cat.name}
                           {filters.categories.includes(cat.id) && (
                             <Check className="ml-auto h-3.5 w-3.5 text-primary" />
                           )}
@@ -1422,7 +1500,7 @@ onClick={() => {
                   <div>
                     <h5 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact</h5>
                     <div className="space-y-1">
-                      {CLIENTS.map((client) => (
+                      {clientsForFilter.map((client) => (
                         <button
                           key={client.id}
                           type="button"
@@ -1449,7 +1527,7 @@ onClick={() => {
                   <div>
                     <h5 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">Payment Method</h5>
                     <div className="flex flex-wrap gap-2">
-                      {PAYMENT_METHODS.map((method) => (
+                      {paymentMethods.map((method) => (
                         <button
                           key={method.id}
                           type="button"
@@ -1461,7 +1539,7 @@ onClick={() => {
                           }`}
                         >
                           <CreditCard className="h-3 w-3" />
-                          {method.label}
+                          {method.name}
                         </button>
                       ))}
                     </div>
@@ -1511,41 +1589,25 @@ onClick={() => {
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel className="text-xs text-muted-foreground">New entry in</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => {
-                setNewEntry({ ...newEntry, type: 'work' })
-                setIsAddEventOpen(true)
-              }}>
-                <Briefcase className="mr-2 h-4 w-4" />
-                Work done
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setNewEntry({ ...newEntry, type: 'time' })
-                setIsAddEventOpen(true)
-              }}>
-                <Clock className="mr-2 h-4 w-4" />
-                Time
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setNewEntry({ ...newEntry, type: 'expense' })
-                setIsAddEventOpen(true)
-              }}>
-                <Receipt className="mr-2 h-4 w-4" />
-                Expenses
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setNewEntry({ ...newEntry, type: 'travel' })
-                setIsAddEventOpen(true)
-              }}>
-                <Car className="mr-2 h-4 w-4" />
-                Travels
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setNewEntry({ ...newEntry, type: 'note' })
-                setIsAddEventOpen(true)
-              }}>
-                <FileText className="mr-2 h-4 w-4" />
-                Note
-              </DropdownMenuItem>
+              {entryTypes.map((t) => {
+                const display = getEventTypeDisplay(entryTypes, t.id)
+                const Icon = display.icon
+                return (
+                  <DropdownMenuItem
+                    key={t.id}
+                    onClick={() => {
+                      const next = { ...newEntry, type: t.id }
+                      if (t.id === 'time' && next.amount === '') next.amount = String(calendarConfig?.defaultHourlyRate ?? 75)
+                      if (t.id === 'travel' && next.kmRate === '') next.kmRate = String(calendarConfig?.defaultKmRate ?? 0.58)
+                      setNewEntry(next)
+                      setIsAddEventOpen(true)
+                    }}
+                  >
+                    <Icon className="mr-2 h-4 w-4" />
+                    {t.label}
+                  </DropdownMenuItem>
+                )
+              })}
             </DropdownMenuContent>
           </DropdownMenu>
           
@@ -1556,41 +1618,31 @@ onClick={() => {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <SheetTitle className="text-base whitespace-nowrap">New entry in</SheetTitle>
-                    <Select value={newEntry.type} onValueChange={(v) => setNewEntry({ ...newEntry, type: v })}>
+                    <Select
+                      value={entryTypes.some((t) => t.id === newEntry.type) ? newEntry.type : (entryTypes[0]?.id ?? 'work')}
+                      onValueChange={(v) => {
+                        const next = { ...newEntry, type: v }
+                        if (v === 'time' && newEntry.amount === '') next.amount = String(calendarConfig?.defaultHourlyRate ?? 75)
+                        if (v === 'travel' && newEntry.kmRate === '') next.kmRate = String(calendarConfig?.defaultKmRate ?? 0.58)
+                        setNewEntry(next)
+                      }}
+                    >
                       <SelectTrigger className="h-8 w-[130px] text-sm font-medium">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="work">
-                          <span className="flex items-center gap-2">
-                            <Briefcase className="h-3.5 w-3.5" />
-                            Work done
-                          </span>
-                        </SelectItem>
-                        <SelectItem value="time">
-                          <span className="flex items-center gap-2">
-                            <Clock className="h-3.5 w-3.5" />
-                            Time
-                          </span>
-                        </SelectItem>
-                        <SelectItem value="expense">
-                          <span className="flex items-center gap-2">
-                            <Receipt className="h-3.5 w-3.5" />
-                            Expenses
-                          </span>
-                        </SelectItem>
-                        <SelectItem value="travel">
-                          <span className="flex items-center gap-2">
-                            <Car className="h-3.5 w-3.5" />
-                            Travels
-                          </span>
-                        </SelectItem>
-                        <SelectItem value="note">
-                          <span className="flex items-center gap-2">
-                            <FileText className="h-3.5 w-3.5" />
-                            Note
-                          </span>
-                        </SelectItem>
+                        {entryTypes.map((t) => {
+                          const display = getEventTypeDisplay(entryTypes, t.id)
+                          const Icon = display.icon
+                          return (
+                            <SelectItem key={t.id} value={t.id}>
+                              <span className="flex items-center gap-2">
+                                <Icon className="h-3.5 w-3.5" />
+                                {t.label}
+                              </span>
+                            </SelectItem>
+                          )
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1630,17 +1682,15 @@ onClick={() => {
                             <Button
                               type="button"
                               size="sm"
-                              onClick={() => {
+                              onClick={async () => {
                                 if (newClientName.trim()) {
-                                  addContact({
-                                    name: newClientName.trim(),
-                                    email: '',
-                                    phone: '',
-                                    address: '',
-                                  })
-                                  setNewEntry({ ...newEntry, client: newClientName.trim() })
-                                  setNewClientName('')
-                                  setIsAddingClient(false)
+                                  const name = newClientName.trim()
+                                  if (name) {
+                                    await addContact({ name, email: '' })
+                                    setNewEntry({ ...newEntry, client: name })
+                                    setNewClientName('')
+                                    setIsAddingClient(false)
+                                  }
                                 }
                               }}
                             >
@@ -1708,7 +1758,7 @@ onClick={() => {
                         <Label>Hourly Rate ($)</Label>
                         <Input
                           type="number"
-                          placeholder="75"
+                          placeholder={String(calendarConfig?.defaultHourlyRate ?? 75)}
                           value={newEntry.amount}
                           onChange={(e) => setNewEntry({ ...newEntry, amount: e.target.value })}
                         />
@@ -1733,17 +1783,15 @@ onClick={() => {
                           <Button
                             type="button"
                             size="sm"
-                            onClick={() => {
+                            onClick={async () => {
                               if (newClientName.trim()) {
-                                addContact({
-                                  name: newClientName.trim(),
-                                  email: '',
-                                  phone: '',
-                                  address: '',
-                                })
-                                setNewEntry({ ...newEntry, client: newClientName.trim() })
-                                setNewClientName('')
-                                setIsAddingClient(false)
+                                const name = newClientName.trim()
+                                if (name) {
+                                  await addContact({ name, email: '' })
+                                  setNewEntry({ ...newEntry, client: name })
+                                  setNewClientName('')
+                                  setIsAddingClient(false)
+                                }
                               }
                             }}
                           >
@@ -1851,22 +1899,18 @@ onClick={() => {
                     <div className="space-y-2">
                       <Label>Category</Label>
                       <Select 
-                        value={newEntry.category || ''} 
+                        value={newEntry.category || defaultCategoryId || ''} 
                         onValueChange={(v) => setNewEntry({ ...newEntry, category: v })}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="office">Office Supplies</SelectItem>
-                          <SelectItem value="software">Software & Subscriptions</SelectItem>
-                          <SelectItem value="travel">Travel</SelectItem>
-                          <SelectItem value="meals">Meals & Entertainment</SelectItem>
-                          <SelectItem value="utilities">Utilities</SelectItem>
-                          <SelectItem value="professional">Professional Services</SelectItem>
-                          <SelectItem value="marketing">Marketing</SelectItem>
-                          <SelectItem value="equipment">Equipment</SelectItem>
-                          <SelectItem value="other">Other</SelectItem>
+                          {sortAlphabetically(categories).map((cat) => (
+                            <SelectItem key={cat.id} value={cat.id}>
+                              {cat.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1881,18 +1925,18 @@ onClick={() => {
                     <div className="space-y-2">
                       <Label>Payment Method</Label>
                       <Select 
-                        value={newEntry.paymentMethod || 'Credit Card'} 
+                        value={newEntry.paymentMethod || defaultPaymentMethodName || ''} 
                         onValueChange={(v) => setNewEntry({ ...newEntry, paymentMethod: v })}
                       >
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue placeholder="Select payment method" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Credit Card">Credit Card</SelectItem>
-                          <SelectItem value="Debit Card">Debit Card</SelectItem>
-                          <SelectItem value="Cash">Cash</SelectItem>
-                          <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                          <SelectItem value="PayPal">PayPal</SelectItem>
+                          {sortAlphabetically(paymentMethods).map((method) => (
+                            <SelectItem key={method.id} value={method.name}>
+                              {method.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1922,7 +1966,13 @@ onClick={() => {
                       </div>
                       <div className="space-y-2">
                         <Label>Rate per km ($)</Label>
-                        <Input type="number" step="0.01" placeholder="0.58" defaultValue="0.58" />
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder={String(calendarConfig?.defaultKmRate ?? 0.58)}
+                          value={newEntry.kmRate}
+                          onChange={(e) => setNewEntry({ ...newEntry, kmRate: e.target.value })}
+                        />
                       </div>
                     </div>
                       <div className="space-y-2">
@@ -2024,12 +2074,15 @@ onClick={() => {
                           <Button
                             type="button"
                             size="sm"
-                            onClick={() => {
+                            onClick={async () => {
                               if (newClientName.trim()) {
-                                addContact({ name: newClientName.trim() })
-                                setNewEntry({ ...newEntry, client: newClientName.trim() })
-                                setNewClientName('')
-                                setIsAddingClient(false)
+                                const name = newClientName.trim()
+                                if (name) {
+                                  await addContact({ name, email: '' })
+                                  setNewEntry({ ...newEntry, client: name })
+                                  setNewClientName('')
+                                  setIsAddingClient(false)
+                                }
                               }
                             }}
                           >
@@ -2278,7 +2331,7 @@ onClick={() => {
                         </div>
                         <div className="space-y-2 pl-12">
                           {events.map((event) => {
-                            const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
+                            const config = getEventTypeDisplay(entryTypes, event.type)
                             const Icon = config.icon
                             return (
                               <button
@@ -2372,7 +2425,7 @@ onClick={() => {
                         </span>
                         <div className="mt-1 flex-1 space-y-0.5 overflow-hidden">
                           {events.slice(0, 4).map((event) => {
-                            const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
+                            const config = getEventTypeDisplay(entryTypes, event.type)
                             return (
                               <button
                                 key={event.id}
@@ -2449,7 +2502,7 @@ onClick={() => {
                         </div>
                         <div className="flex-1 space-y-1.5">
                           {events.map((event) => {
-                            const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
+                            const config = getEventTypeDisplay(entryTypes, event.type)
                             const Icon = config.icon
                             return (
                               <button
@@ -2635,42 +2688,6 @@ onClick={() => {
                     )}
                   </CardContent>
                 </Card>
-
-                {/* Mobile Quick Add */}
-                <Card className="border-border/50">
-                  <CardHeader className="p-3 pb-2">
-                    <CardTitle className="text-sm font-medium">Quick Add</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-3 pt-0">
-                    <div className="grid grid-cols-4 gap-2">
-                      {[
-                        { type: 'work', icon: Clock, label: 'Work' },
-                        { type: 'expense', icon: Receipt, label: 'Expense' },
-                        { type: 'travel', icon: Car, label: 'Travel' },
-                        { type: 'meeting', icon: Users, label: 'Meeting' },
-                      ].map((item) => {
-                        const config = eventTypeConfig[item.type as keyof typeof eventTypeConfig]
-                        return (
-                          <Button
-                            key={item.type}
-                            variant="ghost"
-                            className="h-auto flex-col gap-1 px-2 py-3"
-                            onClick={() => {
-                              setNewEntry({ ...newEntry, type: item.type })
-                              setIsSidebarOpen(false)
-                              setIsAddEventOpen(true)
-                            }}
-                          >
-                            <div className={`rounded p-1.5 ${config.color}`}>
-                              <item.icon className="h-4 w-4" />
-                            </div>
-                            <span className="text-[10px]">{item.label}</span>
-                          </Button>
-                        )
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
             </ScrollArea>
           </SheetContent>
@@ -2824,109 +2841,19 @@ onClick={() => {
                 </CardContent>
               </Card>
 
-              {/* Selected Date - Compact */}
-              <Card className="border-border/50">
-                <CardHeader className="p-3 pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    {selectedDate
-                      ? selectedDate.toLocaleDateString('en-US', {
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric',
-                        })
-                      : 'Select a Date'}
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    {selectedDateEvents.length} {selectedDateEvents.length === 1 ? 'entry' : 'entries'}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-3 pt-0">
-                  {selectedDateEvents.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {selectedDateEvents.map((event) => {
-                        const config = eventTypeConfig[event.type as keyof typeof eventTypeConfig]
-                        const Icon = config.icon
-                        return (
-                          <button
-                            key={event.id}
-                            type="button"
-                            onClick={() => handleEditEvent(event)}
-                            className="group flex w-full items-start gap-2 rounded-md border border-border/50 p-2 text-left transition-colors hover:bg-accent/30"
-                          >
-                            <div className={`rounded p-1.5 ${config.color}`}>
-                              <Icon className="h-3 w-3" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium leading-tight">{event.title}</p>
-                              {event.client && <p className="text-[10px] text-muted-foreground">{event.client}</p>}
-                              {event.amount && (
-                                <p className="mt-0.5 text-xs font-semibold">${event.amount.toLocaleString()}</p>
-                              )}
-                            </div>
-                            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ) : (
-                    <div className="py-4 text-center">
-                      <p className="mb-2 text-xs text-muted-foreground">No entries</p>
-                      <Button size="sm" className="h-7 text-xs" onClick={() => setIsAddEventOpen(true)}>
-                        <Plus className="mr-1.5 h-3 w-3" />
-                        Add Entry
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Quick Add - Compact */}
-              <Card className="border-border/50">
-                <CardHeader className="p-3 pb-2">
-                  <CardTitle className="text-sm font-medium">Quick Add</CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 pt-0">
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { type: 'work', icon: Clock, label: 'Work' },
-                      { type: 'expense', icon: Receipt, label: 'Expense' },
-                      { type: 'travel', icon: Car, label: 'Travel' },
-                      { type: 'meeting', icon: Users, label: 'Meeting' },
-                    ].map((item) => {
-                      const config = eventTypeConfig[item.type as keyof typeof eventTypeConfig]
-                      return (
-                        <Button
-                          key={item.type}
-                          variant="ghost"
-                          className="h-auto flex-col gap-0.5 px-1 py-2"
-                          onClick={() => {
-                            setNewEntry({ ...newEntry, type: item.type })
-                            setIsAddEventOpen(true)
-                          }}
-                        >
-                          <div className={`rounded p-1 ${config.color}`}>
-                            <item.icon className="h-3 w-3" />
-                          </div>
-                          <span className="text-[10px]">{item.label}</span>
-                        </Button>
-                      )
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Legend - Compact inline */}
+              {/* Legend - from backend /calendar/config only */}
               <Card className="border-border/50">
                 <CardContent className="p-3">
                   <div className="flex flex-wrap gap-x-3 gap-y-1">
-                    {Object.entries(eventTypeConfig)
-                      .slice(0, 6)
-                      .map(([key, config]) => (
-                        <div key={key} className="flex items-center gap-1.5">
-                          <div className={`h-2 w-2 rounded-full ${config.dotColor}`} />
-                          <span className="text-[10px] text-muted-foreground">{config.label}</span>
+                    {entryTypes.map((t) => {
+                      const display = getEventTypeDisplay(entryTypes, t.id)
+                      return (
+                        <div key={t.id} className="flex items-center gap-1.5">
+                          <div className={`h-2 w-2 rounded-full ${display.dotColor}`} />
+                          <span className="text-[10px] text-muted-foreground">{t.label}</span>
                         </div>
-                      ))}
+                      )
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -2971,28 +2898,23 @@ onClick={() => {
               </Button>
             </div>
             
-            {/* Add Entry Options - Collapsible */}
+            {/* Add Entry Options - from backend entry types */}
             {showAddEntryOptions && (
               <div className="mt-3 grid grid-cols-5 gap-2">
-                {[
-                  { type: 'work', icon: Briefcase, label: 'Work done' },
-                  { type: 'time', icon: Clock, label: 'Time' },
-                  { type: 'expense', icon: Receipt, label: 'Expenses' },
-                  { type: 'travel', icon: Car, label: 'Travels' },
-                  { type: 'note', icon: FileText, label: 'Note' },
-                ].map((item) => {
-                  const config = eventTypeConfig[item.type as keyof typeof eventTypeConfig]
+                {entryTypes.map((t) => {
+                  const display = getEventTypeDisplay(entryTypes, t.id)
+                  const Icon = display.icon
                   return (
                     <Button
-                      key={item.type}
+                      key={t.id}
                       variant="outline"
                       className="h-auto flex-col gap-1 bg-transparent px-2 py-2"
-                      onClick={() => handleAddNewFromDailyPanel(item.type)}
+                      onClick={() => handleAddNewFromDailyPanel(t.id)}
                     >
-                      <div className={`rounded p-1 ${config.color}`}>
-                        <item.icon className="h-3.5 w-3.5" />
+                      <div className={`rounded p-1 ${display.color}`}>
+                        <Icon className="h-3.5 w-3.5" />
                       </div>
-                      <span className="text-[10px]">{item.label}</span>
+                      <span className="text-[10px]">{t.label}</span>
                     </Button>
                   )
                 })}
@@ -3030,15 +2952,13 @@ onClick={() => {
                 return (
                   <div className="space-y-4">
                     {Object.entries(groupedEntries).map(([type, typeEntries]) => {
-                      const config = eventTypeConfig[type as keyof typeof eventTypeConfig]
-                      if (!config) return null
-                      
+                      const config = getEventTypeDisplay(entryTypes, type)
                       return (
                         <div key={type}>
                           <div className="mb-2 flex items-center gap-2">
                             <div className={`h-2 w-2 rounded-full ${config.dotColor}`} />
                             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                              {config.label}
+                              {getEntryTypeLabel(entryTypes, type)}
                             </span>
                           </div>
                           <div className="space-y-1.5">
@@ -3100,10 +3020,10 @@ onClick={() => {
               {editingEvent && (
                 <>
                   <div
-                    className={`rounded p-1.5 ${eventTypeConfig[editingEvent.type as keyof typeof eventTypeConfig]?.color}`}
+                    className={`rounded p-1.5 ${getEventTypeDisplay(entryTypes, editingEvent.type).color}`}
                   >
                     {(() => {
-                      const Icon = eventTypeConfig[editingEvent.type as keyof typeof eventTypeConfig]?.icon
+                      const Icon = getEventTypeDisplay(entryTypes, editingEvent.type).icon
                       return Icon ? <Icon className="h-4 w-4" /> : null
                     })()}
                   </div>
@@ -3125,27 +3045,15 @@ onClick={() => {
           {editingEvent && (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="space-y-4 px-4 py-4 sm:px-6">
-                {/* Entry Type - Always visible */}
+                {/* Entry Type - Read-only (fixed when entry was created) */}
                 <div className="space-y-2">
                   <Label className="text-xs">Entry Type</Label>
-                  <Select
-                    value={editingEvent.type}
-                    onValueChange={(v) => setEditingEvent({ ...editingEvent, type: v })}
-                  >
-                    <SelectTrigger className="h-10 sm:h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(eventTypeConfig).map(([key, config]) => (
-                        <SelectItem key={key} value={key}>
-                          <div className="flex items-center gap-2">
-                            <div className={`h-2 w-2 rounded-full ${config.dotColor}`} />
-                            {config.label}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-muted/50 px-3 text-sm sm:h-9">
+<div className={`h-2 w-2 shrink-0 rounded-full ${getEventTypeDisplay(entryTypes, editingEvent.type).dotColor}`} />
+                      <span className="text-muted-foreground">
+                      {getEntryTypeLabel(entryTypes, editingEvent.type)}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Title - Always visible */}
@@ -3223,10 +3131,11 @@ onClick={() => {
                             type="button"
                             size="sm"
                             className="h-10 sm:h-9"
-                            onClick={() => {
+                            onClick={async () => {
                               if (newClientName.trim()) {
-                                addContact({ name: newClientName.trim() })
-                                setEditingEvent({ ...editingEvent, client: newClientName.trim() })
+                                const name = newClientName.trim()
+                                await addContact({ name, email: '' })
+                                setEditingEvent({ ...editingEvent, client: name })
                                 setNewClientName('')
                                 setIsAddingClientInEdit(false)
                               }
@@ -3311,9 +3220,9 @@ onClick={() => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">No category</SelectItem>
-                          {sortAlphabetically(CATEGORIES).map((cat) => (
+                          {sortAlphabetically(categories).map((cat) => (
                             <SelectItem key={cat.id} value={cat.id}>
-                              {cat.label}
+                              {cat.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -3322,7 +3231,11 @@ onClick={() => {
                     <div className="space-y-2">
                       <Label className="text-xs">Payment Method</Label>
                       <Select
-                        value={editingEvent.paymentMethod || 'none'}
+                        value={
+                          paymentMethods.find((p) => p.name === editingEvent.paymentMethod)?.id ??
+                          editingEvent.paymentMethod ??
+                          'none'
+                        }
                         onValueChange={(v) =>
                           setEditingEvent({ ...editingEvent, paymentMethod: v === 'none' ? undefined : v })
                         }
@@ -3332,9 +3245,9 @@ onClick={() => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Not specified</SelectItem>
-                          {sortAlphabetically(PAYMENT_METHODS).map((method) => (
+                          {sortAlphabetically(paymentMethods).map((method) => (
                             <SelectItem key={method.id} value={method.id}>
-                              {method.label}
+                              {method.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -3371,10 +3284,11 @@ onClick={() => {
                             type="button"
                             size="sm"
                             className="h-10 sm:h-9"
-                            onClick={() => {
+                            onClick={async () => {
                               if (newClientName.trim()) {
-                                addContact({ name: newClientName.trim() })
-                                setEditingEvent({ ...editingEvent, client: newClientName.trim() })
+                                const name = newClientName.trim()
+                                await addContact({ name, email: '' })
+                                setEditingEvent({ ...editingEvent, client: name })
                                 setNewClientName('')
                                 setIsAddingClientInEdit(false)
                               }
@@ -3546,10 +3460,11 @@ onClick={() => {
                             type="button"
                             size="sm"
                             className="h-10 sm:h-9"
-                            onClick={() => {
+                            onClick={async () => {
                               if (newClientName.trim()) {
-                                addContact({ name: newClientName.trim() })
-                                setEditingEvent({ ...editingEvent, client: newClientName.trim() })
+                                const name = newClientName.trim()
+                                await addContact({ name, email: '' })
+                                setEditingEvent({ ...editingEvent, client: name })
                                 setNewClientName('')
                                 setIsAddingClientInEdit(false)
                               }
@@ -3662,15 +3577,17 @@ onClick={() => {
                   Save Changes
                 </Button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mt-3 w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => handleDeleteEvent(editingEvent.id)}
-              >
-                <Trash2 className="mr-2 h-3 w-3" />
-                Delete Entry
-              </Button>
+              {(editingEvent.id.startsWith('expense-') || editingEvent.id.startsWith('work-') || editingEvent.id.startsWith('local-')) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-3 w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => handleDeleteEvent(editingEvent.id)}
+                >
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  Delete Entry
+                </Button>
+              )}
             </div>
           )}
         </SheetContent>

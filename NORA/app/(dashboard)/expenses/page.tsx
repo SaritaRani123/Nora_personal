@@ -34,11 +34,11 @@ import { CategoryChart } from '@/components/category-chart'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar as CalendarComponent } from '@/components/ui/calendar'
-import { format } from 'date-fns'
-import { parseDateString } from '@/lib/calendar-utils'
-import { ExpenseForm, EXPENSE_STATUS_OPTIONS } from '@/components/expenses/ExpenseForm'
+import { format, subDays, isSameMonth, subMonths } from 'date-fns'
+import { parseDateString, formatDateToLocal } from '@/lib/calendar-utils'
+import { ExpenseForm } from '@/components/expenses/ExpenseForm'
 import { useToast } from '@/hooks/use-toast'
-import { getPaymentMethodById } from '@/lib/services/expense-service'
+import { fetchConfig, DEFAULT_EXPENSE_STATUS_OPTIONS } from '@/lib/services/app-config'
 import type { ExpenseCreatePayload, ExpenseUpdatePayload } from '@/types/expense'
 import {
   listExpenses,
@@ -48,6 +48,7 @@ import {
   type Expense,
   type Category,
 } from '@/lib/services/expenses'
+import { filterExpenses, getTotalExpensesFromFiltered } from '@/lib/expense-filters'
 
 // Helper function for case-insensitive alphabetical sorting
 const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
@@ -79,34 +80,21 @@ export default function ExpensesPage() {
   // API-driven data fetching with SWR
   const { data: expenses = [], error: expensesError, isLoading: expensesLoading } = useSWR('expenses', expensesFetcher)
   const { data: categories = [], error: categoriesError, isLoading: categoriesLoading } = useSWR('categories', categoriesFetcher)
-  
+  const { data: config } = useSWR('config', fetchConfig)
+
+  const statusOptions = config?.expenseStatusOptions ?? DEFAULT_EXPENSE_STATUS_OPTIONS
+  const missingStatusLabel = config?.missingStatusLabel ?? 'N/A'
+
   const { toast } = useToast()
 
   const isLoading = expensesLoading || categoriesLoading
   const hasError = expensesError || categoriesError
 
-  const filteredExpenses = expenses.filter((e) => {
-    const matchesCategory = categoryFilter === 'all' || e.category === categoryFilter
-    const matchesSearch = e.description.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesStatus = statusFilter === 'all' || e.status === statusFilter
-    
-    // Date range filter - compare date strings directly (YYYY-MM-DD format)
-    let matchesDateRange = true
-    if (dateRange.from || dateRange.to) {
-      const expenseDateStr = e.date // Already in YYYY-MM-DD format
-      const fromStr = dateRange.from ? format(dateRange.from, 'yyyy-MM-dd') : null
-      const toStr = dateRange.to ? format(dateRange.to, 'yyyy-MM-dd') : null
-      
-      if (fromStr && toStr) {
-        matchesDateRange = expenseDateStr >= fromStr && expenseDateStr <= toStr
-      } else if (fromStr) {
-        matchesDateRange = expenseDateStr >= fromStr
-      } else if (toStr) {
-        matchesDateRange = expenseDateStr <= toStr
-      }
-    }
-    
-    return matchesCategory && matchesSearch && matchesDateRange && matchesStatus
+  const filteredExpenses = filterExpenses(expenses, {
+    categoryFilter,
+    searchQuery,
+    statusFilter,
+    dateRange,
   })
 
   const clearDateRange = () => {
@@ -161,7 +149,7 @@ export default function ExpensesPage() {
       getCategoryName(e.category),
       e.amount.toFixed(2),
       e.paymentMethod,
-      e.status || 'N/A'
+      e.status || missingStatusLabel
     ])
     
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
@@ -188,7 +176,40 @@ export default function ExpensesPage() {
     return { earliest: sorted[0], latest: sorted[sorted.length - 1] }
   }, [expenses])
 
-  const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0)
+  const totalExpenses = getTotalExpensesFromFiltered(filteredExpenses)
+
+  // Calculate "This Month" - sum of expenses in the current month
+  const now = new Date()
+  const thisMonthExpenses = expenses.filter((e) => {
+    const expenseDate = parseDateString(e.date)
+    return isSameMonth(expenseDate, now)
+  })
+  const thisMonthTotal = thisMonthExpenses.reduce((sum, e) => sum + e.amount, 0)
+
+  // Calculate "Last Month" for comparison
+  const lastMonth = subMonths(now, 1)
+  const lastMonthExpenses = expenses.filter((e) => {
+    const expenseDate = parseDateString(e.date)
+    return isSameMonth(expenseDate, lastMonth)
+  })
+  const lastMonthTotal = lastMonthExpenses.reduce((sum, e) => sum + e.amount, 0)
+  const monthOverMonthChange = lastMonthTotal > 0
+    ? ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100
+    : (thisMonthTotal > 0 ? 100 : 0)
+  const monthOverMonthChangeText = monthOverMonthChange >= 0
+    ? `+${Math.round(monthOverMonthChange)}%`
+    : `${Math.round(monthOverMonthChange)}%`
+
+  // Calculate "Average per Day" - (sum of last 30 days) / 30
+  const thirtyDaysAgo = subDays(now, 30)
+  const thirtyDaysAgoStr = formatDateToLocal(thirtyDaysAgo)
+  const nowStr = formatDateToLocal(now)
+  const last30DaysExpenses = expenses.filter((e) => e.date >= thirtyDaysAgoStr && e.date <= nowStr)
+  const last30DaysTotal = last30DaysExpenses.reduce((sum, e) => sum + e.amount, 0)
+  const averagePerDay = last30DaysTotal / 30
+
+  // Calculate "Pending Review" - count where status is not 'paid'
+  const pendingReviewCount = expenses.filter((e) => e.status !== 'paid').length
 
   const getCategoryName = (categoryId: string) => {
     return categories.find(c => c.id === categoryId)?.name || categoryId
@@ -208,16 +229,19 @@ export default function ExpensesPage() {
 
   const handleFormSubmit = useCallback(async (data: ExpenseCreatePayload | ExpenseUpdatePayload) => {
     try {
-      // Convert new payload format to API format
-      const paymentMethod = getPaymentMethodById((data as ExpenseCreatePayload).paymentMethodId)
-      
+      const payload = data as ExpenseCreatePayload
+      const paymentMethodName = config?.paymentMethods?.find(p => p.id === payload.paymentMethodId)?.name
+        ?? config?.paymentMethods?.find(p => p.id === config?.defaultPaymentMethodId)?.name
+        ?? 'Credit Card'
+      const defaultStatus = config?.defaultExpenseStatus ?? 'pending'
+
       const apiData = {
         date: data.date || '',
         description: data.description || '',
-        category: (data as ExpenseCreatePayload).categoryId || '',
+        category: payload.categoryId || '',
         amount: data.amount || 0,
-        paymentMethod: paymentMethod?.name || 'Credit Card',
-        status: (data as ExpenseCreatePayload).status || ((data as ExpenseCreatePayload).isPaid ? 'paid' : 'pending'),
+        paymentMethod: paymentMethodName,
+        status: payload.status || (payload.isPaid ? 'paid' : defaultStatus),
         source: 'manual' as const,
       }
 
@@ -245,7 +269,7 @@ export default function ExpensesPage() {
       })
       throw error
     }
-  }, [formMode, selectedExpense, toast])
+  }, [formMode, selectedExpense, toast, config])
 
   // Loading state
   if (isLoading) {
@@ -377,13 +401,13 @@ export default function ExpensesPage() {
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <p className="text-2xl font-bold text-destructive cursor-default">$8,450</p>
+                    <p className="text-2xl font-bold text-destructive cursor-default">${thisMonthTotal.toLocaleString()}</p>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
-                    <p>Current month spending: $8,450</p>
+                    <p>Current month spending: ${thisMonthTotal.toLocaleString()}</p>
                   </TooltipContent>
                 </Tooltip>
-                <p className="mt-1 text-xs text-destructive">+12% from last month</p>
+                <p className="mt-1 text-xs text-destructive">{monthOverMonthChangeText} from last month</p>
               </CardContent>
             </Card>
             <Card className="bg-card border-border">
@@ -404,10 +428,10 @@ export default function ExpensesPage() {
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <p className="text-2xl font-bold text-foreground cursor-default">$338</p>
+                    <p className="text-2xl font-bold text-foreground cursor-default">${Math.round(averagePerDay).toLocaleString()}</p>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
-                    <p>~$338 average daily spend over 30 days</p>
+                    <p>~${Math.round(averagePerDay).toLocaleString()} average daily spend over 30 days</p>
                   </TooltipContent>
                 </Tooltip>
                 <p className="mt-1 text-xs text-muted-foreground">Last 30 days</p>
@@ -431,10 +455,10 @@ export default function ExpensesPage() {
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <p className="text-2xl font-bold text-warning cursor-default">5</p>
+                    <p className="text-2xl font-bold text-warning cursor-default">{pendingReviewCount}</p>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
-                    <p>5 expenses need your attention</p>
+                    <p>{pendingReviewCount} expenses need your attention</p>
                   </TooltipContent>
                 </Tooltip>
                 <p className="mt-1 text-xs text-muted-foreground">Need categorization</p>
@@ -483,7 +507,7 @@ export default function ExpensesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Statuses</SelectItem>
-                    {EXPENSE_STATUS_OPTIONS.map((status) => (
+                    {statusOptions.map((status) => (
                       <SelectItem key={status.value} value={status.value}>
                         <div className="flex items-center gap-2">
                           <div className={`h-2 w-2 rounded-full ${
@@ -550,8 +574,8 @@ export default function ExpensesPage() {
                           onSelect={(date) => setDateRange(prev => ({ ...prev, from: date }))}
                           defaultMonth={dateRange.from || new Date()}
                           captionLayout="dropdown"
-                          startMonth={new Date(2020, 0)}
-                          endMonth={new Date(2030, 11)}
+                          startMonth={new Date(config?.calendarMinYear ?? 2020, 0)}
+                          endMonth={new Date(config?.calendarMaxYear ?? 2030, 11)}
                           initialFocus
                           fixedWeeks
                           showOutsideDays
@@ -567,8 +591,8 @@ export default function ExpensesPage() {
                           onSelect={(date) => setDateRange(prev => ({ ...prev, to: date }))}
                           defaultMonth={dateRange.to || new Date()}
                           captionLayout="dropdown"
-                          startMonth={new Date(2020, 0)}
-                          endMonth={new Date(2030, 11)}
+                          startMonth={new Date(config?.calendarMinYear ?? 2020, 0)}
+                          endMonth={new Date(config?.calendarMaxYear ?? 2030, 11)}
                           disabled={(date) => dateRange.from ? date < dateRange.from : false}
                           fixedWeeks
                           showOutsideDays
@@ -695,10 +719,11 @@ export default function ExpensesPage() {
                       <TableCell className="text-muted-foreground whitespace-nowrap">{expense.paymentMethod}</TableCell>
                       <TableCell>
                         {(() => {
-                          const statusOption = EXPENSE_STATUS_OPTIONS.find(s => s.value === expense.status) || EXPENSE_STATUS_OPTIONS.find(s => s.value === 'pending')
+                          const defaultStatusValue = config?.defaultExpenseStatus ?? 'pending'
+                          const statusOption = statusOptions.find(s => s.value === expense.status) || statusOptions.find(s => s.value === defaultStatusValue)
                           return (
                             <Badge variant="outline" className={statusOption?.color}>
-                              {statusOption?.label || 'Pending'}
+                              {statusOption?.label || statusOptions.find(s => s.value === defaultStatusValue)?.label || missingStatusLabel}
                             </Badge>
                           )
                         })()}
