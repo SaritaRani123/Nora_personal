@@ -10,6 +10,10 @@ import payableSummaryRoutes from './routes/payable-summary.js';
 import statsRoutes from './routes/stats.js';
 import chartsRoutes from './routes/charts.js';
 import reportsRoutes from './routes/reports.js';
+import configRoutes from './routes/config.js';
+import paymentMethodsRoutes from './routes/payment-methods.js';
+import workDoneRoutes from './routes/work-done.js';
+import calendarRoutes from './routes/calendar.js';
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -38,6 +42,10 @@ app.use('/payable-summary', payableSummaryRoutes);
 app.use('/stats', statsRoutes);
 app.use('/charts', chartsRoutes);
 app.use('/reports', reportsRoutes);
+app.use('/config', configRoutes);
+app.use('/payment-methods', paymentMethodsRoutes);
+app.use('/work-done', workDoneRoutes);
+app.use('/calendar', calendarRoutes);
 
 // 404 handler
 app.use((req, res) => {

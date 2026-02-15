@@ -1,4 +1,9 @@
-import { expenses } from '../data/mockData.js';
+import { expenses, paymentMethods, appConfig } from '../data/mockData.js';
+
+function getDefaultPaymentMethodName() {
+  const defaultMethod = paymentMethods.find(p => p.id === appConfig.defaultPaymentMethodId);
+  return defaultMethod?.name ?? 'Credit Card';
+}
 
 // In-memory store (replace with database in production)
 let expensesStore = [...expenses];
@@ -45,10 +50,10 @@ export const createExpense = (req, res) => {
       description: req.body.description || '',
       category: req.body.category || 'office',
       amount: req.body.amount || 0,
-      paymentMethod: req.body.paymentMethod || 'Credit Card',
+      paymentMethod: req.body.paymentMethod || getDefaultPaymentMethodName(),
       aiSuggested: req.body.aiSuggested ?? false,
       confidence: req.body.confidence ?? 100,
-      status: req.body.status || 'pending',
+      status: req.body.status || appConfig.defaultExpenseStatus,
       source: req.body.source || 'manual'
     };
 
@@ -97,3 +102,15 @@ export const deleteExpense = (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+/** Sum of expense amounts in date range [from, to] (inclusive). For calendar summary. */
+export function getExpenseTotalsForRange(from, to) {
+  if (!from || !to) return 0;
+  const filtered = filterExpenses(expensesStore, { from, to });
+  return filtered.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+}
+
+/** Return current expenses store for reports/aggregations. */
+export function getExpensesStore() {
+  return expensesStore;
+}

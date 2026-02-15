@@ -160,6 +160,51 @@ export const categories = [
   { id: 'education', name: 'Education & Training', code: '8299' }
 ];
 
+// App config: payment methods, expense status options, and defaults (all from backend)
+export const paymentMethods = [
+  { id: 'credit', name: 'Credit Card' },
+  { id: 'debit', name: 'Debit Card' },
+  { id: 'cash', name: 'Cash' },
+  { id: 'bank', name: 'Bank Transfer' },
+  { id: 'cheque', name: 'Cheque' },
+  { id: 'etransfer', name: 'E-Transfer' },
+];
+
+export const expenseStatusOptions = [
+  { value: 'paid', label: 'Paid', color: 'bg-green-500/10 text-green-600 border-green-500/20' },
+  { value: 'pending', label: 'Pending', color: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20' },
+  { value: 'overdue', label: 'Overdue', color: 'bg-red-500/10 text-red-600 border-red-500/20' },
+  { value: 'review', label: 'Needs Review', color: 'bg-blue-500/10 text-blue-600 border-blue-500/20' },
+];
+
+export const appConfig = {
+  defaultPaymentMethodId: 'credit',
+  defaultExpenseStatus: 'pending',
+  defaultCategoryId: 'office',
+  missingStatusLabel: 'N/A',
+  calendarMinYear: 2020,
+  calendarMaxYear: 2030,
+};
+
+/** Calendar entry types: id, label, iconKey, colorKey. Frontend maps keys to Lucide icons and Tailwind classes. Income, Invoice, Tax, Overdue excluded from Add Entry. */
+export const calendarEntryTypes = [
+  { id: 'work', label: 'Work Done', iconKey: 'briefcase', colorKey: 'primary' },
+  { id: 'time', label: 'Time', iconKey: 'clock', colorKey: 'chart3' },
+  { id: 'expense', label: 'Expense', iconKey: 'receipt', colorKey: 'destructive' },
+  { id: 'meeting', label: 'Meeting', iconKey: 'users', colorKey: 'chart4' },
+  { id: 'travel', label: 'Travels', iconKey: 'car', colorKey: 'chart5' },
+  { id: 'note', label: 'Note', iconKey: 'fileText', colorKey: 'muted' },
+];
+
+/** Defaults for calendar entry forms (rate per km for travel, hourly rate for time). */
+export const calendarConfigDefaults = {
+  defaultKmRate: 0.58,
+  defaultHourlyRate: 75,
+};
+
+// Work Done entries (from Calendar); invoiceId null = unbilled
+export const workDoneEntries = [];
+
 export const budget = [
   {
     year: '2025-2026',

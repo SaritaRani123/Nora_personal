@@ -65,7 +65,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import useSWR, { mutate } from 'swr'
-import { listInvoices, createInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
+import { listInvoices, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
 import { listWorkDone, type WorkDoneEntry } from '@/lib/services/work-done'
 import { generateInvoicePDF } from '@/lib/invoices/generateInvoicePDF'
 
@@ -206,6 +206,13 @@ const InvoicesPage = () => {
       })()
     }
   }
+
+  type InvoiceStatus = Invoice['status']
+  const handleStatusChange = useCallback(async (invoice: Invoice, newStatus: InvoiceStatus) => {
+    const paidDate = newStatus === 'paid' ? new Date().toISOString().split('T')[0] : (invoice.paidDate ?? null)
+    await updateInvoice(invoice.id, { status: newStatus, paidDate })
+    await mutate('invoices')
+  }, [])
 
   return (
     <div className="space-y-6 p-6">
@@ -376,10 +383,7 @@ const InvoicesPage = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredInvoices.map((invoice) => {
-                  const status = statusConfig[invoice.status]
-                  const StatusIcon = status.icon
-                  return (
+                filteredInvoices.map((invoice) => (
                     <TableRow key={invoice.id}>
                       <TableCell className="font-medium">{invoice.id}</TableCell>
                       <TableCell>
@@ -390,10 +394,22 @@ const InvoicesPage = () => {
                       </TableCell>
                       <TableCell className="font-medium">{getCurrencySymbol(invoice)}{invoice.amount.toLocaleString()}</TableCell>
                       <TableCell>
-                        <Badge variant={status.variant} className={`gap-1 ${status.color}`}>
-                          <StatusIcon className="h-3 w-3" />
-                          {status.label}
-                        </Badge>
+                        <Select
+                          value={invoice.status}
+                          onValueChange={(value) => handleStatusChange(invoice, value as InvoiceStatus)}
+                        >
+                          <SelectTrigger className="w-[120px] h-8 border-0 shadow-none bg-transparent hover:bg-muted/50 p-0 gap-1">
+                            <Badge className={`font-normal ${statusConfig[invoice.status].color}`} variant="secondary">
+                              {statusConfig[invoice.status].label}
+                            </Badge>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="draft">Draft</SelectItem>
+                            <SelectItem value="pending">Pending</SelectItem>
+                            <SelectItem value="paid">Paid</SelectItem>
+                            <SelectItem value="overdue">Overdue</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>{formatDate(invoice.dueDate)}</TableCell>
                       <TableCell className="text-right">
@@ -432,8 +448,7 @@ const InvoicesPage = () => {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  )
-                })
+                ))
               )}
             </TableBody>
           </Table>
@@ -451,18 +466,28 @@ const InvoicesPage = () => {
           </DialogHeader>
           {previewInvoice && (
             <div ref={previewRef} className="space-y-6">
-              {/* Status Badge */}
+              {/* Status - editable */}
               <div className="flex items-center justify-between">
-                <Badge 
-                  variant={statusConfig[previewInvoice.status].variant} 
-                  className={`gap-1 ${statusConfig[previewInvoice.status].color}`}
+                <Select
+                  value={previewInvoice.status}
+                  onValueChange={async (value) => {
+                    const newStatus = value as InvoiceStatus
+                    await handleStatusChange(previewInvoice, newStatus)
+                    setPreviewInvoice({ ...previewInvoice, status: newStatus, paidDate: newStatus === 'paid' ? new Date().toISOString().split('T')[0] : previewInvoice.paidDate })
+                  }}
                 >
-                  {(() => {
-                    const StatusIcon = statusConfig[previewInvoice.status].icon
-                    return <StatusIcon className="h-3 w-3" />
-                  })()}
-                  {statusConfig[previewInvoice.status].label}
-                </Badge>
+                  <SelectTrigger className="w-[140px] p-0 gap-1">
+                    <Badge className={`font-normal ${statusConfig[previewInvoice.status].color}`} variant="secondary">
+                      {statusConfig[previewInvoice.status].label}
+                    </Badge>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="paid">Paid</SelectItem>
+                    <SelectItem value="overdue">Overdue</SelectItem>
+                  </SelectContent>
+                </Select>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => handleDownloadPDF(previewInvoice)} className="bg-transparent">
                     <Download className="h-4 w-4 mr-1" />

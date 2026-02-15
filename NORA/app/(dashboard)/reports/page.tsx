@@ -1,12 +1,11 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import useSWR from 'swr'
 import {
   Download,
   FileText,
   Printer,
-  Calendar,
   TrendingUp,
   TrendingDown,
   Search,
@@ -66,9 +65,10 @@ import {
   ComposedChart,
 } from 'recharts'
 import { cn } from '@/lib/utils'
-import { parseDateString } from '@/lib/calendar-utils'
+import { parseDateString, formatDateToLocal } from '@/lib/calendar-utils'
 import { SpendingHeatmap } from '@/components/spending-heatmap'
 
+import { DateRangeFilter } from '@/components/date-range-filter'
 import { getReports, type ReportsData } from '@/lib/services/reports'
 
 const CHART_COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#eab308', '#a855f7', '#6b7280']
@@ -141,7 +141,8 @@ const renderActiveShape = (props: ActiveShapeProps) => {
 }
 
 export default function ReportsPage() {
-  const [dateRange, setDateRange] = useState('month')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [paymentFilter, setPaymentFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -150,24 +151,39 @@ export default function ReportsPage() {
   const [trendPeriod, setTrendPeriod] = useState<'7D' | '30D' | '3M' | '1Y'>('30D')
   const [profitLossPeriod, setProfitLossPeriod] = useState<'7D' | '30D' | '3M' | '1Y'>('30D')
   const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined)
-  const [selectedCategory, setSelectedCategory] = useState<string>('Food')
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
 
-  const { data, isLoading } = useSWR<ReportsData>('reports', getReports)
+  // Only send date range to API when both From and To are set
+  const { data, isLoading, mutate } = useSWR<ReportsData>(
+    ['reports', fromDate || null, toDate || null],
+    ([, start, end]) => {
+      const s = start as string | null
+      const e = end as string | null
+      const hasBoth = s && e
+      return getReports(hasBoth ? { startDate: s, endDate: e, from: s, to: e } : undefined)
+    }
+  )
 
   const onPieEnter = useCallback((_: unknown, index: number) => setActivePieIndex(index), [])
   const onPieLeave = useCallback(() => setActivePieIndex(undefined), [])
 
   const resetFilters = () => {
-    setDateRange('month')
+    setFromDate('')
+    setToDate('')
     setCategoryFilter('all')
     setPaymentFilter('all')
     setSearchQuery('')
+    setSortField('amount')
+    setSortOrder('desc')
+    mutate()
   }
 
   const stats = data?.stats ?? {
     totalIncome: 0, totalExpenses: 0, netSavings: 0, savingsRate: 0,
     avgDailySpend: 0, highestCategory: '-', incomeChange: 0, expenseChange: 0, savingsChange: 0,
   }
+  const highestCategoryAmount = (data?.categoryDistribution ?? []).find((c) => c.name === stats.highestCategory)?.value ?? 0
+
   const categoryDistribution = data?.categoryDistribution ?? []
   const spendingTrend = data?.spendingTrend ?? {}
   const profitLossTrend = data?.profitLossTrend ?? {}
@@ -181,6 +197,9 @@ export default function ReportsPage() {
 
   const filteredTransactions = useMemo(() => {
     let result = [...topTransactions]
+    if (fromDate && toDate) {
+      result = result.filter((t) => t.date >= fromDate && t.date <= toDate)
+    }
     if (categoryFilter !== 'all') {
       result = result.filter((t) => t.category.toLowerCase() === categoryFilter.toLowerCase())
     }
@@ -203,7 +222,7 @@ export default function ReportsPage() {
       return sortOrder === 'asc' ? a.amount - b.amount : b.amount - a.amount
     })
     return result
-  }, [topTransactions, categoryFilter, paymentFilter, searchQuery, sortField, sortOrder])
+  }, [topTransactions, fromDate, toDate, categoryFilter, paymentFilter, searchQuery, sortField, sortOrder])
 
   const toggleSort = (field: 'date' | 'amount' | 'merchant' | 'category' | 'payment') => {
     if (sortField === field) {
@@ -215,6 +234,67 @@ export default function ReportsPage() {
   }
 
   const drilldownData = categoryDrilldown[selectedCategory]
+
+  // Category options from reports data (categoryDistribution)
+  const categoryOptions = useMemo(() => {
+    const names = (categoryDistribution ?? []).map((c) => c.name).filter(Boolean)
+    return ['all', ...[...new Set(names)].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))]
+  }, [categoryDistribution])
+
+  // Payment options from reports data (topTransactions)
+  const paymentOptions = useMemo(() => {
+    const methods = (topTransactions ?? []).map((t) => t.payment).filter(Boolean)
+    return ['all', ...[...new Set(methods)].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))]
+  }, [topTransactions])
+
+  // Sync selectedCategory to first available drilldown when data loads or selection is invalid
+  useEffect(() => {
+    const keys = Object.keys(categoryDrilldown).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    if (keys.length === 0) return
+    if (!selectedCategory || !(selectedCategory in categoryDrilldown)) {
+      setSelectedCategory(keys[0])
+    }
+  }, [categoryDrilldown, selectedCategory])
+
+  /** Escape a CSV field: wrap in quotes if it contains comma, quote, or newline; double quotes inside. */
+  const escapeCsvField = useCallback((value: string): string => {
+    const s = String(value ?? '')
+    if (/[,"\n\r]/.test(s)) {
+      return `"${s.replace(/"/g, '""')}"`
+    }
+    return s
+  }, [])
+
+  const handleDownloadCsv = useCallback(() => {
+    const headers = ['Date', 'Merchant', 'Category', 'Payment', 'Amount']
+    const rows = filteredTransactions.map((t) => {
+      const dateRaw = t.date
+      const dateStr =
+        typeof dateRaw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateRaw)
+          ? dateRaw.slice(0, 10)
+          : formatDateToLocal(new Date(dateRaw))
+      const amountFormatted = Number(t.amount).toFixed(2)
+      return [
+        dateStr,
+        escapeCsvField(t.merchant ?? ''),
+        escapeCsvField(t.category ?? ''),
+        escapeCsvField(t.payment ?? ''),
+        amountFormatted,
+      ]
+    })
+    const csv = [headers.map(escapeCsvField).join(','), ...rows.map((r) => r.join(','))].join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `reports-${formatDateToLocal(new Date())}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [filteredTransactions, escapeCsvField])
+
+  const handlePrint = useCallback(() => {
+    window.print()
+  }, [])
 
   if (isLoading || !data) {
     return (
@@ -237,31 +317,23 @@ export default function ReportsPage() {
           <p className="text-sm text-muted-foreground mt-1">Analyze your spending and track your financial health</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger className="w-[180px] h-9">
-              <Calendar className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="custom">Custom</SelectItem>
-              <SelectItem value="3-months">Last 3 Months</SelectItem>
-              <SelectItem value="last-month">Last Month</SelectItem>
-              <SelectItem value="month">This Month</SelectItem>
-            </SelectContent>
-          </Select>
+          <DateRangeFilter
+            fromDate={fromDate}
+            toDate={toDate}
+            onFromDateChange={setFromDate}
+            onToDateChange={setToDate}
+            title="Filter by Date"
+            description="Select a date range for reports"
+          />
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
             <SelectTrigger className="w-[160px] h-9">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="bills">Bills</SelectItem>
-              <SelectItem value="food">Food</SelectItem>
-              <SelectItem value="fuel">Fuel</SelectItem>
-              <SelectItem value="marketing">Marketing</SelectItem>
-              <SelectItem value="office">Office</SelectItem>
-              <SelectItem value="shopping">Shopping</SelectItem>
-              <SelectItem value="travel">Travel</SelectItem>
+              {categoryOptions.filter((v) => v !== 'all').map((cat) => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={paymentFilter} onValueChange={setPaymentFilter}>
@@ -270,26 +342,25 @@ export default function ReportsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Methods</SelectItem>
-              <SelectItem value="bank transfer">Bank Transfer</SelectItem>
-              <SelectItem value="card">Card</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="upi">UPI</SelectItem>
+              {paymentOptions.filter((v) => v !== 'all').map((method) => (
+                <SelectItem key={method} value={method}>{method}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={resetFilters} className="h-9 bg-transparent">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Reset
-          </Button>
-          <div className="flex items-center gap-1 border-l border-border pl-2 ml-1">
-            <Button variant="outline" size="sm" className="h-9 bg-transparent">
+          <div className="flex items-center gap-1 border-l border-border pl-2 ml-1 print:hidden">
+            <Button variant="outline" size="sm" onClick={resetFilters} className="h-9 bg-transparent">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reset
+            </Button>
+            <Button variant="outline" size="sm" onClick={handlePrint} className="h-9 bg-transparent" title="Print or Save as PDF">
               <FileText className="h-4 w-4 mr-2" />
               PDF
             </Button>
-            <Button variant="outline" size="sm" className="h-9 bg-transparent">
+            <Button variant="outline" size="sm" onClick={handleDownloadCsv} className="h-9 bg-transparent">
               <Download className="h-4 w-4 mr-2" />
               CSV
             </Button>
-            <Button variant="outline" size="sm" className="h-9 bg-transparent">
+            <Button variant="outline" size="sm" onClick={handlePrint} className="h-9 bg-transparent">
               <Printer className="h-4 w-4 mr-2" />
               Print
             </Button>
@@ -351,7 +422,9 @@ export default function ReportsPage() {
                 <PiggyBank className="h-4 w-4 text-blue-500" />
               </div>
             </div>
-            <p className="text-2xl font-bold tracking-tight text-blue-500">+${stats.netSavings.toLocaleString()}</p>
+            <p className={cn("text-2xl font-bold tracking-tight", stats.netSavings >= 0 ? "text-blue-500" : "text-rose-500")}>
+              {stats.netSavings >= 0 ? '+' : ''}${stats.netSavings.toLocaleString()}
+            </p>
             <div className="flex items-center gap-1.5 mt-2">
               <Badge variant="secondary" className="text-xs bg-blue-500/10 text-blue-600">
                 <TrendingUp className="h-3 w-3 mr-1" />+{stats.savingsChange}%
@@ -371,10 +444,10 @@ export default function ReportsPage() {
                 <Percent className="h-4 w-4 text-violet-500" />
               </div>
             </div>
-            <p className="text-2xl font-bold tracking-tight">{stats.savingsRate}%</p>
+            <p className="text-2xl font-bold tracking-tight">{stats.savingsRate.toFixed(1)}%</p>
             <div className="mt-2">
               <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: `${stats.savingsRate}%` }} />
+                <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: `${Math.min(100, stats.savingsRate)}%` }} />
               </div>
             </div>
           </CardContent>
@@ -406,7 +479,9 @@ export default function ReportsPage() {
               </div>
             </div>
             <p className="text-2xl font-bold tracking-tight">{stats.highestCategory}</p>
-            <p className="text-xs text-muted-foreground mt-2">$5,800 this month</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              ${highestCategoryAmount.toLocaleString()} in selected period
+            </p>
           </CardContent>
         </Card>
 
@@ -921,13 +996,9 @@ export default function ReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="bills">Bills</SelectItem>
-                  <SelectItem value="food">Food</SelectItem>
-                  <SelectItem value="fuel">Fuel</SelectItem>
-                  <SelectItem value="marketing">Marketing</SelectItem>
-                  <SelectItem value="office">Office</SelectItem>
-                  <SelectItem value="shopping">Shopping</SelectItem>
-                  <SelectItem value="travel">Travel</SelectItem>
+                  {categoryOptions.filter((v) => v !== 'all').map((cat) => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select value={paymentFilter} onValueChange={setPaymentFilter}>
@@ -936,10 +1007,9 @@ export default function ReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Methods</SelectItem>
-                  <SelectItem value="bank transfer">Bank Transfer</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="upi">UPI</SelectItem>
+                  {paymentOptions.filter((v) => v !== 'all').map((method) => (
+                    <SelectItem key={method} value={method}>{method}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <div className="relative w-full sm:w-56">

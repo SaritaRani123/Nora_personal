@@ -23,6 +23,8 @@ export interface Category {
 export interface ListExpensesFilters {
   from?: string // YYYY-MM-DD
   to?: string // YYYY-MM-DD
+  startDate?: string // YYYY-MM-DD (preferred; backend should accept)
+  endDate?: string // YYYY-MM-DD (preferred; backend should accept)
   categoryId?: string
   status?: string
 }
@@ -57,8 +59,12 @@ export async function listExpenses(
 ): Promise<Expense[]> {
   const params = new URLSearchParams()
 
-  if (filters?.from) params.set('from', filters.from)
-  if (filters?.to) params.set('to', filters.to)
+  const from = filters?.from ?? filters?.startDate
+  const to = filters?.to ?? filters?.endDate
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  if (filters?.startDate) params.set('startDate', filters.startDate)
+  if (filters?.endDate) params.set('endDate', filters.endDate)
   if (filters?.categoryId) params.set('categoryId', filters.categoryId)
   if (filters?.status) params.set('status', filters.status)
 

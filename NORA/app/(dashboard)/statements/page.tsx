@@ -48,11 +48,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+import { DateRangeFilter } from '@/components/date-range-filter'
 import { cn } from '@/lib/utils'
 
 import { getStatementsWithStats, uploadStatement, getStatementTransactions, saveStatement, type Statement, type StatementsStats, type StatementTransaction } from '@/lib/services/statements'
@@ -340,11 +336,6 @@ export default function StatementsPage() {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
-
-  const clearDateFilters = () => {
-    setFromDate('')
-    setToDate('')
   }
 
   const openViewTransactions = async (statement: Statement) => {
@@ -682,61 +673,14 @@ export default function StatementsPage() {
                   <SelectItem value="credit card">Credit Card</SelectItem>
                 </SelectContent>
               </Select>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="bg-transparent">
-                    <Calendar className="mr-2 h-4 w-4" />
-                    Date Range
-                    {(fromDate || toDate) && (
-                      <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
-                        {fromDate || toDate ? '1' : '0'}
-                      </Badge>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80" align="end">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-sm">Filter by Upload Date</h4>
-                      <p className="text-xs text-muted-foreground">
-                        Select a date range to filter statements
-                      </p>
-                    </div>
-                    <div className="grid gap-3">
-                      <div className="grid gap-1.5">
-                        <Label htmlFor="fromDate" className="text-xs">From Date</Label>
-                        <Input
-                          id="fromDate"
-                          type="date"
-                          value={fromDate}
-                          onChange={(e) => setFromDate(e.target.value)}
-                          className="h-9"
-                        />
-                      </div>
-                      <div className="grid gap-1.5">
-                        <Label htmlFor="toDate" className="text-xs">To Date</Label>
-                        <Input
-                          id="toDate"
-                          type="date"
-                          value={toDate}
-                          onChange={(e) => setToDate(e.target.value)}
-                          className="h-9"
-                        />
-                      </div>
-                    </div>
-                    {(fromDate || toDate) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={clearDateFilters}
-                        className="w-full bg-transparent"
-                      >
-                        Clear Dates
-                      </Button>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <DateRangeFilter
+                fromDate={fromDate}
+                toDate={toDate}
+                onFromDateChange={setFromDate}
+                onToDateChange={setToDate}
+                title="Filter by Upload Date"
+                description="Select a date range to filter statements"
+              />
             </div>
           </div>
         </CardHeader>

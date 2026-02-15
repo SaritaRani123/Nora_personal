@@ -32,8 +32,7 @@ import {
 } from '@/components/ui/select'
 import { CategoryChart } from '@/components/category-chart'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Calendar as CalendarComponent } from '@/components/ui/calendar'
+import { DateRangeFilter } from '@/components/date-range-filter'
 import { format, subDays, isSameMonth, subMonths } from 'date-fns'
 import { parseDateString, formatDateToLocal } from '@/lib/calendar-utils'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
@@ -59,8 +58,11 @@ const sortAlphabetically = <T extends { name?: string; label?: string }>(items: 
   })
 }
 
-// SWR fetcher functions
-const expensesFetcher = () => listExpenses()
+// Only send date range to API when both From and To are set (backend filters by from/to)
+const expensesFetcher = (from?: string | null, to?: string | null) => {
+  const hasBoth = from && to
+  return listExpenses(hasBoth ? { from, to, startDate: from, endDate: to } : undefined)
+}
 const categoriesFetcher = () => listCategories()
 
 export default function ExpensesPage() {
@@ -69,16 +71,16 @@ export default function ExpensesPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null)
-  const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
-    from: undefined,
-    to: undefined,
-  })
-  const [dateRangeOpen, setDateRangeOpen] = useState(false)
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set())
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
-  // API-driven data fetching with SWR
-  const { data: expenses = [], error: expensesError, isLoading: expensesLoading } = useSWR('expenses', expensesFetcher)
+  // API-driven data fetching with SWR; backend filters by startDate/endDate
+  const { data: expenses = [], error: expensesError, isLoading: expensesLoading } = useSWR(
+    ['expenses', fromDate || null, toDate || null],
+    ([, start, end]) => expensesFetcher(start as string | undefined, end as string | undefined)
+  )
   const { data: categories = [], error: categoriesError, isLoading: categoriesLoading } = useSWR('categories', categoriesFetcher)
   const { data: config } = useSWR('config', fetchConfig)
 
@@ -90,25 +92,27 @@ export default function ExpensesPage() {
   const isLoading = expensesLoading || categoriesLoading
   const hasError = expensesError || categoriesError
 
+  // When both dates are set: backend is asked to filter (from/to); we also filter client-side so the range works even if backend doesn't support it
+  const dateRangeForFilter =
+    fromDate && toDate
+      ? { from: new Date(fromDate), to: new Date(toDate) }
+      : { from: undefined as Date | undefined, to: undefined as Date | undefined }
   const filteredExpenses = filterExpenses(expenses, {
     categoryFilter,
     searchQuery,
     statusFilter,
-    dateRange,
+    dateRange: dateRangeForFilter,
   })
-
-  const clearDateRange = () => {
-    setDateRange({ from: undefined, to: undefined })
-  }
 
   const clearAllFilters = () => {
     setCategoryFilter('all')
     setStatusFilter('all')
     setSearchQuery('')
-    setDateRange({ from: undefined, to: undefined })
+    setFromDate('')
+    setToDate('')
   }
 
-  const hasDateRange = dateRange.from || dateRange.to
+  const hasDateRange = Boolean(fromDate || toDate)
   const hasAnyFilter = hasDateRange || categoryFilter !== 'all' || searchQuery !== '' || statusFilter !== 'all'
 
   // Selection handlers
@@ -167,14 +171,6 @@ export default function ExpensesPage() {
       description: `Exported ${expensesToExport.length} expense${expensesToExport.length !== 1 ? 's' : ''} to CSV`,
     })
   }
-
-  // Get the earliest and latest expense dates to set calendar default month
-  const expenseDateRange = React.useMemo(() => {
-    if (expenses.length === 0) return { earliest: new Date(), latest: new Date() }
-    const dates = expenses.map(e => parseDateString(e.date))
-    const sorted = dates.sort((a, b) => a.getTime() - b.getTime())
-    return { earliest: sorted[0], latest: sorted[sorted.length - 1] }
-  }, [expenses])
 
   const totalExpenses = getTotalExpensesFromFiltered(filteredExpenses)
 
@@ -521,105 +517,14 @@ export default function ExpensesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Popover open={dateRangeOpen} onOpenChange={setDateRangeOpen}>
-                  <PopoverTrigger asChild>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className={`hidden sm:flex bg-transparent ${hasDateRange ? 'border-primary text-primary' : ''}`}
-                    >
-                      <Calendar className="mr-2 h-4 w-4" />
-                      {hasDateRange ? (
-                        <>
-                          {dateRange.from ? format(dateRange.from, 'MMM d, yyyy') : 'Start'}
-                          {' - '}
-                          {dateRange.to ? format(dateRange.to, 'MMM d, yyyy') : 'End'}
-                        </>
-                      ) : (
-                        'Date Range'
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="end">
-                    <div className="p-3 border-b border-border">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium">Select Date Range</p>
-                        {hasDateRange && (
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="h-auto p-1 text-muted-foreground hover:text-foreground"
-                            onClick={clearDateRange}
-                          >
-                            <X className="h-4 w-4" />
-                            <span className="sr-only">Clear date range</span>
-                          </Button>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {hasDateRange 
-                          ? `Showing ${filteredExpenses.length} expenses`
-                          : `Expenses range: ${format(expenseDateRange.earliest, 'MMM d, yyyy')} - ${format(expenseDateRange.latest, 'MMM d, yyyy')}`
-                        }
-                      </p>
-                    </div>
-                    <div className="flex">
-                      <div className="border-r border-border">
-                        <div className="px-3 py-2 border-b border-border">
-                          <p className="text-xs font-medium text-muted-foreground">From</p>
-                        </div>
-                        <CalendarComponent
-                          mode="single"
-                          selected={dateRange.from}
-                          onSelect={(date) => setDateRange(prev => ({ ...prev, from: date }))}
-                          defaultMonth={dateRange.from || new Date()}
-                          captionLayout="dropdown"
-                          startMonth={new Date(config?.calendarMinYear ?? 2020, 0)}
-                          endMonth={new Date(config?.calendarMaxYear ?? 2030, 11)}
-                          initialFocus
-                          fixedWeeks
-                          showOutsideDays
-                        />
-                      </div>
-                      <div>
-                        <div className="px-3 py-2 border-b border-border">
-                          <p className="text-xs font-medium text-muted-foreground">To</p>
-                        </div>
-                        <CalendarComponent
-                          mode="single"
-                          selected={dateRange.to}
-                          onSelect={(date) => setDateRange(prev => ({ ...prev, to: date }))}
-                          defaultMonth={dateRange.to || new Date()}
-                          captionLayout="dropdown"
-                          startMonth={new Date(config?.calendarMinYear ?? 2020, 0)}
-                          endMonth={new Date(config?.calendarMaxYear ?? 2030, 11)}
-                          disabled={(date) => dateRange.from ? date < dateRange.from : false}
-                          fixedWeeks
-                          showOutsideDays
-                        />
-                      </div>
-                    </div>
-                    <div className="p-3 border-t border-border flex justify-end gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="bg-transparent"
-                        onClick={() => {
-                          clearDateRange()
-                          setDateRangeOpen(false)
-                        }}
-                      >
-                        Clear
-                      </Button>
-                      <Button 
-                        size="sm"
-                        onClick={() => setDateRangeOpen(false)}
-                      >
-                        Apply
-                      </Button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                <DateRangeFilter
+                  fromDate={fromDate}
+                  toDate={toDate}
+                  onFromDateChange={setFromDate}
+                  onToDateChange={setToDate}
+                  title="Filter by Date"
+                  description="Select a date range to filter expenses"
+                />
                 {hasAnyFilter && (
                   <Button 
                     variant="ghost" 

@@ -79,3 +79,16 @@ export const deleteInvoice = (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+/** Sum of paid invoice amounts whose paidDate is in [from, to]. For calendar summary (income). */
+export function getIncomeTotalsForRange(from, to) {
+  if (!from || !to) return 0;
+  return invoicesStore
+    .filter((i) => i.status === 'paid' && i.paidDate && i.paidDate >= from && i.paidDate <= to)
+    .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+}
+
+/** Return current invoices store for reports/aggregations. */
+export function getInvoicesStore() {
+  return invoicesStore;
+}

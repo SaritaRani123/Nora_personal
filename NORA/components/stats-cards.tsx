@@ -1,12 +1,13 @@
 'use client'
 
 import useSWR from 'swr'
+import { isSameMonth, subMonths } from 'date-fns'
 import { TrendingUp, TrendingDown, DollarSign, Receipt, Wallet } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { listInvoices, type Invoice } from '@/lib/services/invoices'
 import { listExpenses, type Expense } from '@/lib/services/expenses'
-import { filterExpenses, getTotalExpensesFromFiltered, DEFAULT_EXPENSE_FILTERS } from '@/lib/expense-filters'
+import { parseDateString } from '@/lib/calendar-utils'
 
 export function StatsCards() {
   const {
@@ -43,39 +44,80 @@ export function StatsCards() {
   const invoicesSafe = invoices ?? []
   const expensesSafe = expenses ?? []
 
-  // Total Income: sum of paid invoices
+  const now = new Date()
+  const lastMonth = subMonths(now, 1)
+
+  // Helper: % change vs last period; when last is 0, use +100% / -100% / 0% to avoid division by zero
+  const pctChange = (current: number, last: number): number => {
+    if (last === 0) {
+      if (current > 0) return 100
+      if (current < 0) return -100
+      return 0
+    }
+    return ((current - last) / last) * 100
+  }
+  const formatChange = (pct: number): string =>
+    pct >= 0 ? `+${Math.round(pct)}%` : `${Math.round(pct)}%`
+  const trendFromPct = (pct: number): 'up' | 'down' | 'flat' =>
+    pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat'
+
+  // Total Income = all-time sum of paid invoices (backend)
   const totalIncome = invoicesSafe
     .filter((inv) => inv.status === 'paid')
     .reduce((sum, inv) => sum + (inv.amount || 0), 0)
 
-  // Total Expenses: same calculation as Expenses page (same filters/date range logic, default = no filters)
-  const filteredExpenses = filterExpenses(expensesSafe, DEFAULT_EXPENSE_FILTERS)
-  const totalExpenses = getTotalExpensesFromFiltered(filteredExpenses)
+  // This month / last month income: paid invoices by paidDate
+  const paidInvoices = invoicesSafe.filter((inv) => inv.status === 'paid' && inv.paidDate)
+  const thisMonthIncome = paidInvoices
+    .filter((inv) => isSameMonth(parseDateString(inv.paidDate!), now))
+    .reduce((sum, inv) => sum + (inv.amount || 0), 0)
+  const lastMonthIncome = paidInvoices
+    .filter((inv) => isSameMonth(parseDateString(inv.paidDate!), lastMonth))
+    .reduce((sum, inv) => sum + (inv.amount || 0), 0)
+  const incomePct = pctChange(thisMonthIncome, lastMonthIncome)
 
+  // Total Expenses = all-time sum of all expenses (backend)
+  const totalExpenses = expensesSafe.reduce((sum, e) => sum + e.amount, 0)
+
+  // This month / last month expenses (backend)
+  const thisMonthExpenses = expensesSafe
+    .filter((e) => isSameMonth(parseDateString(e.date), now))
+    .reduce((sum, e) => sum + e.amount, 0)
+  const lastMonthExpenses = expensesSafe
+    .filter((e) => isSameMonth(parseDateString(e.date), lastMonth))
+    .reduce((sum, e) => sum + e.amount, 0)
+  const expensesPct = pctChange(thisMonthExpenses, lastMonthExpenses)
+
+  // Net Profit = all-time income − all-time expenses (backend)
   const netProfit = totalIncome - totalExpenses
+
+  // This month / last month net profit = month income − month expenses
+  const thisMonthNetProfit = thisMonthIncome - thisMonthExpenses
+  const lastMonthNetProfit = lastMonthIncome - lastMonthExpenses
+  const netProfitPct = pctChange(thisMonthNetProfit, lastMonthNetProfit)
 
   const stats = [
     {
       title: 'Total Income',
       value: `$${totalIncome.toLocaleString()}`,
-      change: '+0%',
-      trend: 'up' as 'up' | 'down' | 'flat',
+      change: formatChange(incomePct),
+      trend: trendFromPct(incomePct),
       icon: DollarSign,
       description: 'vs last month',
     },
     {
       title: 'Total Expenses',
       value: `$${totalExpenses.toLocaleString()}`,
-      change: '+0%',
-      trend: 'up' as 'up' | 'down' | 'flat',
+      change: formatChange(expensesPct),
+      trend: trendFromPct(expensesPct),
       icon: Receipt,
       description: 'vs last month',
     },
     {
       title: 'Net Profit',
       value: `$${netProfit.toLocaleString()}`,
-      change: '+0%',
-      trend: netProfit >= 0 ? ('up' as const) : ('down' as const),
+      change: formatChange(netProfitPct),
+      trend: trendFromPct(netProfitPct),
       icon: Wallet,
       description: 'vs last month',
     },

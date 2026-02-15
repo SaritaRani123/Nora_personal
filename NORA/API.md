@@ -42,7 +42,9 @@ Supported response shapes:
 
 ### Expenses
 
-- **GET** `/expenses?from=YYYY-MM-DD&to=YYYY-MM-DD&categoryId=...&status=...`
+- **GET** `/expenses?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&from=...&to=...&categoryId=...&status=...`
+
+  The frontend sends **startDate** and **endDate** for the date-range filter. The backend must accept these query params, filter expenses by date (inclusive), and return only matching rows. If neither is sent, the backend may apply its own default range or return all; no date filtering is done on the frontend.
 
 Response (array form):
 
@@ -261,9 +263,11 @@ Response: `{ "charts": [ { "incomeExpenseData": [...], "categoryData": [...] } ]
 
 ### Reports
 
-- **GET** `/reports`
+- **GET** `/reports?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`
 
-Response: `{ "reports": [ { "stats", "categoryDistribution", "spendingTrend", "profitLossTrend", "incomeVsExpenses", "budgetComparison", "insights", "suggestions", "categoryDrilldown", "topTransactions", "heatmapData" } ] }`
+  The frontend sends **startDate** and **endDate** for the date-range filter. The backend must accept these query params, filter all report data (stats, topTransactions, charts, etc.) by that date range, and return the filtered result. If neither is sent, the backend should apply its own default range. No date filtering is done on the frontend.
+
+  Response: `{ "reports": [ { "stats", "categoryDistribution", "spendingTrend", "profitLossTrend", "incomeVsExpenses", "budgetComparison", "insights", "suggestions", "categoryDrilldown", "topTransactions", "heatmapData" } ] }`
 
 ### Contacts (CRUD)
 
