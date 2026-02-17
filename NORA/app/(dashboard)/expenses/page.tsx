@@ -76,10 +76,15 @@ export default function ExpensesPage() {
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set())
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
-  // API-driven data fetching with SWR; backend filters by startDate/endDate
-  const { data: expenses = [], error: expensesError, isLoading: expensesLoading } = useSWR(
-    ['expenses', fromDate || null, toDate || null],
-    ([, start, end]) => expensesFetcher(start as string | undefined, end as string | undefined)
+  // API-driven data fetching with SWR; only refetch when BOTH dates are set (avoids scroll jump when selecting first date)
+  const dateKey = fromDate && toDate ? [fromDate, toDate] : null
+  const { data: expenses = [], error: expensesError, isLoading: expensesLoading, mutate: mutateExpenses } = useSWR(
+    ['expenses', dateKey],
+    ([, key]) => {
+      const [start, end] = Array.isArray(key) ? key : [null, null]
+      return expensesFetcher(start as string | undefined, end as string | undefined)
+    },
+    { keepPreviousData: true }
   )
   const { data: categories = [], error: categoriesError, isLoading: categoriesLoading } = useSWR('categories', categoriesFetcher)
   const { data: config } = useSWR('config', fetchConfig)
@@ -211,6 +216,20 @@ export default function ExpensesPage() {
     return categories.find(c => c.id === categoryId)?.name || categoryId
   }
 
+  const handleCategoryChange = useCallback(async (expense: Expense, newCategoryId: string) => {
+    if (expense.category === newCategoryId) return
+    try {
+      await updateExpenseAPI(expense.id, { category: newCategoryId })
+      mutateExpenses()
+      mutate('expenses')
+      mutate('payable-summary')
+      mutate((k) => Array.isArray(k) && k[0] === 'charts')
+      toast({ title: 'Category updated', description: `Changed to ${getCategoryName(newCategoryId)}` })
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update category', variant: 'destructive' })
+    }
+  }, [mutateExpenses, toast, categories])
+
   const handleAddExpense = () => {
     setSelectedExpense(null)
     setFormMode('create')
@@ -255,8 +274,11 @@ export default function ExpensesPage() {
         })
       }
       
-      // Revalidate the expenses data
+      // Revalidate the expenses data (use bound mutate - key is ['expenses', fromDate, toDate])
+      mutateExpenses()
       mutate('expenses')
+      mutate('payable-summary')
+      mutate((k) => Array.isArray(k) && k[0] === 'charts')
     } catch (error) {
       toast({
         title: 'Error',
@@ -265,7 +287,7 @@ export default function ExpensesPage() {
       })
       throw error
     }
-  }, [formMode, selectedExpense, toast, config])
+  }, [formMode, selectedExpense, toast, config, mutateExpenses])
 
   // Loading state
   if (isLoading) {
@@ -283,7 +305,7 @@ export default function ExpensesPage() {
       <div className="flex h-[calc(100vh-4rem)] flex-col items-center justify-center gap-4">
         <AlertCircle className="h-8 w-8 text-destructive" />
         <p className="text-sm text-muted-foreground">Failed to load expenses. Please try again.</p>
-        <Button variant="outline" onClick={() => { mutate('expenses'); mutate('categories'); }}>
+        <Button variant="outline" onClick={() => { mutateExpenses(); mutate('expenses'); mutate('categories'); mutate('payable-summary'); mutate((k) => Array.isArray(k) && k[0] === 'charts'); }}>
           Retry
         </Button>
       </div>
@@ -606,7 +628,12 @@ export default function ExpensesPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent>
                               {categories.map((cat) => (
-                                <DropdownMenuItem key={cat.id}>{cat.name}</DropdownMenuItem>
+                                <DropdownMenuItem
+                                  key={cat.id}
+                                  onClick={() => handleCategoryChange(expense, cat.id)}
+                                >
+                                  {cat.name}
+                                </DropdownMenuItem>
                               ))}
                             </DropdownMenuContent>
                           </DropdownMenu>

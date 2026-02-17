@@ -13,12 +13,12 @@ export function StatsCards() {
   const {
     data: invoices,
     isLoading: invoicesLoading,
-  } = useSWR<Invoice[]>('invoices', listInvoices)
+  } = useSWR<Invoice[]>('invoices', listInvoices, { revalidateOnFocus: true })
 
   const {
     data: expenses,
     isLoading: expensesLoading,
-  } = useSWR<Expense[]>('expenses', () => listExpenses())
+  } = useSWR<Expense[]>('expenses', () => listExpenses(), { revalidateOnFocus: true })
 
   const isLoading = invoicesLoading || expensesLoading
 

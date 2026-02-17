@@ -139,9 +139,14 @@ const InvoicesPage = () => {
     })
   }, [invoices, searchQuery, statusFilter])
 
-  // Format date helper
+  // Format date helper (parse YYYY-MM-DD without timezone shift)
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A'
+    const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (m) {
+      const date = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10))
+      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+    }
     const date = new Date(dateString)
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
   }
@@ -193,6 +198,8 @@ const InvoicesPage = () => {
           : undefined,
       })
       await mutate('invoices')
+      await mutate('payable-summary')
+      await mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
     })()
   }
 
@@ -203,6 +210,8 @@ const InvoicesPage = () => {
         await deleteInvoiceApi(invoiceToDelete.id)
         setInvoiceToDelete(null)
         await mutate('invoices')
+        await mutate('payable-summary')
+        await mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
       })()
     }
   }
@@ -212,6 +221,8 @@ const InvoicesPage = () => {
     const paidDate = newStatus === 'paid' ? new Date().toISOString().split('T')[0] : (invoice.paidDate ?? null)
     await updateInvoice(invoice.id, { status: newStatus, paidDate })
     await mutate('invoices')
+    await mutate('payable-summary')
+    await mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
   }, [])
 
   return (

@@ -113,7 +113,7 @@ export function CategoryChart({ compact = false, showTooltip = false }: Category
     ['charts', dateRange],
     () => getCharts(dateRange),
     {
-      revalidateOnFocus: false,
+      revalidateOnFocus: true,
       dedupingInterval: 5000,
     }
   )

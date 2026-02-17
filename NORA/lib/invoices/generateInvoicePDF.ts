@@ -48,6 +48,8 @@ export interface InvoicePDFPayload {
 
 function formatDate(dateString: string): string {
   if (!dateString) return ''
+  const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`
   const date = new Date(dateString)
   const day = date.getDate().toString().padStart(2, '0')
   const month = (date.getMonth() + 1).toString().padStart(2, '0')

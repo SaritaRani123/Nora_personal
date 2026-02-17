@@ -803,6 +803,8 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutate('payable-summary')
+        mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
         mutateCalendarSummary()
         toast({
           title: 'Expense added',
@@ -837,6 +839,8 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutate('payable-summary')
+        mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
         mutateCalendarSummary()
         toast({
           title: 'Travel expense added',
@@ -1027,6 +1031,7 @@ const handleAddEntry = async () => {
           // Revalidate expenses cache
           mutate(`expenses-${viewStartDate}-${viewEndDate}`)
           mutate('expenses')
+          mutate('payable-summary')
           mutateCalendarSummary()
         } catch (error) {
           toast({
@@ -1057,6 +1062,8 @@ const handleAddEntry = async () => {
         await deleteExpenseAPI(originalExpenseId)
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutate('payable-summary')
+        mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
         mutateCalendarSummary()
         toast({ title: 'Entry deleted', description: 'Expense removed.' })
       } else if (eventId.startsWith('work-')) {
@@ -1145,6 +1152,8 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutate('payable-summary')
+        mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
         mutateCalendarSummary()
         toast({
           title: 'Expense added',
@@ -1155,6 +1164,8 @@ const handleAddEntry = async () => {
         // Revalidate expenses cache
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
         mutate('expenses')
+        mutate('payable-summary')
+        mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
         mutateCalendarSummary()
         toast({
           title: 'Expense updated',
@@ -2804,12 +2815,6 @@ const handleAddEntry = async () => {
                             <span className="text-[10px] text-muted-foreground">
                               {parseDateString(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             </span>
-                            {event.recurring && (
-                              <Badge variant="outline" className="h-4 px-1 text-[8px]">
-                                <Repeat className="mr-0.5 h-2 w-2" />
-                                Recurring
-                              </Badge>
-                            )}
                           </div>
                         </div>
                         <div className="text-right">

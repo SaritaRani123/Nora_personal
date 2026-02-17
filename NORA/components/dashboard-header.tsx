@@ -1,11 +1,13 @@
 'use client'
 
-import { Moon, Sun, LogOut } from 'lucide-react'
+import { useState } from 'react'
+import { Moon, Sun, LogOut, Search } from 'lucide-react'
 import { useUser } from '@/lib/contexts/UserContext'
 import { getUserInitials } from '@/lib/services/user'
 import { useTheme } from 'next-themes'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,17 +22,38 @@ export function DashboardHeader() {
   const { theme, setTheme } = useTheme()
   const router = useRouter()
   const { user } = useUser()
+  const [searchQuery, setSearchQuery] = useState('')
 
   const handleLogout = () => {
     router.push('/sign-in')
   }
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (searchQuery.trim()) {
+      router.push(`/reports?q=${encodeURIComponent(searchQuery.trim())}`)
+    } else {
+      router.push('/reports')
+    }
+  }
+
   return (
-    <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex items-center gap-4">
-        <SidebarTrigger className="-ml-1" />
+    <header className="sticky top-0 z-50 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="flex items-center gap-4 flex-1 min-w-0">
+        <SidebarTrigger className="-ml-1 shrink-0" />
+        <form onSubmit={handleSearch} className="flex-1 max-w-md">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground shrink-0" />
+            <Input
+              placeholder="Search transactions..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-9 bg-secondary/50 border-0 w-full"
+            />
+          </div>
+        </form>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <Button
           variant="ghost"
           size="icon"

@@ -67,6 +67,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import useSWR, { mutate } from 'swr'
 import { listContacts, createContact, type Contact as ApiContact } from '@/lib/services/contacts'
 import { listInvoices, createInvoice, updateInvoice, type Invoice } from '@/lib/services/invoices'
@@ -74,6 +75,13 @@ import { markWorkDoneAsInvoiced } from '@/lib/services/work-done'
 import { HttpError } from '@/lib/api/http'
 import { generateInvoicePDFFromPayload, type InvoicePDFPayload } from '@/lib/invoices/generateInvoicePDF'
 import InvoicePreview from './components/InvoicePreview'
+
+// Today's date in YYYY-MM-DD (local timezone, no UTC shift)
+function getTodayYyyyMmDd(): string {
+  const d = new Date()
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 
 // Helper function for case-insensitive alphabetical sorting
 const sortAlphabetically = <T extends { name?: string; label?: string }>(items: T[]): T[] => {
@@ -299,14 +307,14 @@ function CreateInvoiceContent() {
       return {
         invoiceNumber: searchParams.get('id') || `INV-${String(invoices.length + 1).padStart(3, '0')}`,
         poNumber: '',
-        invoiceDate: searchParams.get('issueDate') || new Date().toISOString().split('T')[0],
+        invoiceDate: searchParams.get('issueDate') || getTodayYyyyMmDd(),
         dueDate: searchParams.get('dueDate') || '',
       }
     }
     return {
       invoiceNumber: `INV-${String(invoices.length + 1).padStart(3, '0')}`,
       poNumber: '',
-      invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceDate: getTodayYyyyMmDd(),
       dueDate: '',
     }
   })
@@ -413,9 +421,11 @@ function CreateInvoiceContent() {
   const [isSendModalOpen, setIsSendModalOpen] = useState(false)
   const [sendEmail, setSendEmail] = useState({
     to: '',
+    cc: '',
     subject: '',
     message: '',
     attachPdf: true,
+    sendToSelf: false,
   })
   const [isSending, setIsSending] = useState(false)
 
@@ -433,7 +443,7 @@ function CreateInvoiceContent() {
 
   const [isRecordPaymentOpen, setIsRecordPaymentOpen] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0])
+  const [paymentDate, setPaymentDate] = useState(getTodayYyyyMmDd())
   const [paymentMethod, setPaymentMethod] = useState('bank_transfer')
 
   // Currency symbol based on invoice currency
@@ -475,9 +485,11 @@ function CreateInvoiceContent() {
   const total = subtotal - discountAmount + totalTax
   const amountDue = total
 
-  // Format date as dd/mm/yyyy
+  // Format date as dd/mm/yyyy (parse YYYY-MM-DD without timezone shift)
   const formatDate = useCallback((dateString: string) => {
     if (!dateString) return ''
+    const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`
     const date = new Date(dateString)
     const day = date.getDate().toString().padStart(2, '0')
     const month = (date.getMonth() + 1).toString().padStart(2, '0')
@@ -505,20 +517,23 @@ function CreateInvoiceContent() {
 
   const isSelectedDate = useCallback((day: number, month: number, year: number) => {
     if (!invoiceDetails.dueDate) return false
+    const m = invoiceDetails.dueDate.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (m) return day === parseInt(m[3], 10) && month === parseInt(m[2], 10) - 1 && year === parseInt(m[1], 10)
     const selected = new Date(invoiceDetails.dueDate)
     return day === selected.getDate() && month === selected.getMonth() && year === selected.getFullYear()
   }, [invoiceDetails.dueDate])
 
   const handleDateSelect = useCallback((day: number, month: number, year: number) => {
-    const date = new Date(year, month, day)
-    const dateString = date.toISOString().split('T')[0]
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const dateString = `${year}-${pad(month + 1)}-${pad(day)}`
     setInvoiceDetails(prev => ({ ...prev, dueDate: dateString }))
     setIsCalendarOpen(false)
   }, [])
 
   const handleSetToday = useCallback(() => {
     const today = new Date()
-    const dateString = today.toISOString().split('T')[0]
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const dateString = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
     setInvoiceDetails(prev => ({ ...prev, dueDate: dateString }))
     setCalendarMonth({ month: today.getMonth(), year: today.getFullYear() })
     setIsCalendarOpen(false)
@@ -532,20 +547,23 @@ function CreateInvoiceContent() {
   // Invoice Date calendar helpers
   const isSelectedInvoiceDate = useCallback((day: number, month: number, year: number) => {
     if (!invoiceDetails.invoiceDate) return false
+    const m = invoiceDetails.invoiceDate.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (m) return day === parseInt(m[3], 10) && month === parseInt(m[2], 10) - 1 && year === parseInt(m[1], 10)
     const selected = new Date(invoiceDetails.invoiceDate)
     return day === selected.getDate() && month === selected.getMonth() && year === selected.getFullYear()
   }, [invoiceDetails.invoiceDate])
 
   const handleInvoiceDateSelect = useCallback((day: number, month: number, year: number) => {
-    const date = new Date(year, month, day)
-    const dateString = date.toISOString().split('T')[0]
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const dateString = `${year}-${pad(month + 1)}-${pad(day)}`
     setInvoiceDetails(prev => ({ ...prev, invoiceDate: dateString }))
     setIsInvoiceDateCalendarOpen(false)
   }, [])
 
   const handleSetInvoiceDateToday = useCallback(() => {
     const today = new Date()
-    const dateString = today.toISOString().split('T')[0]
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const dateString = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
     setInvoiceDetails(prev => ({ ...prev, invoiceDate: dateString }))
     setInvoiceDateCalendarMonth({ month: today.getMonth(), year: today.getFullYear() })
     setIsInvoiceDateCalendarOpen(false)
@@ -912,6 +930,8 @@ function CreateInvoiceContent() {
 
     const created = await createInvoice(newInvoiceData)
     await mutate('invoices')
+    await mutate('payable-summary')
+    await mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
     const newInvoiceId = created[0]?.id ?? newInvoiceData.id
     if (unbilledIdsRef.current.length > 0 && newInvoiceId) {
       await markWorkDoneAsInvoiced(unbilledIdsRef.current, newInvoiceId)
@@ -934,7 +954,7 @@ function CreateInvoiceContent() {
   // Optional overrides for Record Payment: status 'paid' and paidDate
   const handleSaveInvoice = async (overrides?: { status?: 'paid' | 'pending' | 'overdue' | 'draft'; paidDate?: string | null }) => {
     const status = overrides?.status ?? mapInvoiceStateToStatus(invoiceState)
-    const paidDate = overrides?.paidDate ?? (status === 'paid' ? new Date().toISOString().split('T')[0] : null)
+    const paidDate = overrides?.paidDate ?? (status === 'paid' ? getTodayYyyyMmDd() : null)
 
     const invoiceData = {
       id: isEditMode && editInvoiceId ? editInvoiceId : invoiceDetails.invoiceNumber,
@@ -965,9 +985,13 @@ function CreateInvoiceContent() {
           }
         }
         await mutate('invoices')
+        await mutate('payable-summary')
+        await mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
       } else {
         const created = await createInvoice(invoiceData)
         await mutate('invoices')
+        await mutate('payable-summary')
+        await mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
         const newInvoiceId = created[0]?.id ?? invoiceData.id
         if (unbilledIdsRef.current.length > 0 && newInvoiceId) {
           await markWorkDoneAsInvoiced(unbilledIdsRef.current, newInvoiceId)
@@ -988,7 +1012,7 @@ function CreateInvoiceContent() {
   const handleRecordPayment = async () => {
     setInvoiceState('paid')
     setIsRecordPaymentOpen(false)
-    const paidDateVal = paymentDate || new Date().toISOString().split('T')[0]
+    const paidDateVal = paymentDate || getTodayYyyyMmDd()
     await handleSaveInvoice({ status: 'paid', paidDate: paidDateVal })
   }
 
@@ -998,7 +1022,7 @@ function CreateInvoiceContent() {
     setInvoiceDetails({
       ...invoiceDetails,
       invoiceNumber: newInvoiceNumber,
-      invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceDate: getTodayYyyyMmDd(),
       dueDate: '',
     })
     setInvoiceState('draft')
@@ -1024,7 +1048,7 @@ function CreateInvoiceContent() {
     setInvoiceDetails({
       invoiceNumber: newInvoiceNumber,
       poNumber: '',
-      invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceDate: getTodayYyyyMmDd(),
       dueDate: '',
     })
     setLineItems([
@@ -1047,9 +1071,11 @@ function CreateInvoiceContent() {
   const openSendModal = () => {
     setSendEmail({
       to: selectedContact?.email || '',
+      cc: '',
       subject: `Invoice ${invoiceDetails.invoiceNumber} from ${businessDetails.name}`,
       message: `Dear ${selectedContact?.name || 'Customer'},\n\nPlease find attached invoice ${invoiceDetails.invoiceNumber} for ${currencySymbol}${total.toFixed(2)}.\n\nPayment is due by ${formatDate(invoiceDetails.dueDate) || 'upon receipt'}.\n\nThank you for your business.\n\nBest regards,\n${businessDetails.name}`,
       attachPdf: true,
+      sendToSelf: false,
     })
     setIsSendModalOpen(true)
   }
@@ -2365,6 +2391,17 @@ function CreateInvoiceContent() {
                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input id="sendTo" type="email" value={sendEmail.to} onChange={(e) => setSendEmail({ ...sendEmail, to: e.target.value })} className="pl-10 h-8" placeholder="customer@email.com" />
               </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="sendCc" className="text-xs">CC</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input id="sendCc" type="text" value={sendEmail.cc} onChange={(e) => setSendEmail({ ...sendEmail, cc: e.target.value })} className="pl-10 h-8" placeholder="cc@example.com" />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="sendToSelf" checked={sendEmail.sendToSelf} onCheckedChange={(checked) => setSendEmail({ ...sendEmail, sendToSelf: checked === true })} />
+              <Label htmlFor="sendToSelf" className="text-xs cursor-pointer">Send copy to self</Label>
             </div>
             <div className="space-y-1">
               <Label htmlFor="subject" className="text-xs">Subject</Label>

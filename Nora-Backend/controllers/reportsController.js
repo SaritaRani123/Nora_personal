@@ -1,6 +1,6 @@
 import { getInvoicesStore } from './invoicesController.js';
 import { getExpensesStore } from './expensesController.js';
-import { categories } from '../data/mockData.js';
+import { categories, budget } from '../data/mockData.js';
 
 const CHART_COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#eab308', '#a855f7', '#6b7280', '#ec4899', '#06b6d4'];
 
@@ -43,6 +43,18 @@ function diffDays(a, b) {
 
 /** Get date bounds from query: range=month|last-month|3-months|custom, optional from&to for custom. */
 function getDateBounds(range, fromQuery, toQuery) {
+  // When from and/or to are provided (custom range), use them with sensible defaults
+  if (fromQuery || toQuery) {
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    const todayStr = toYYYYMMDD(now);
+    const oneYearAgo = addMonths(now, -12);
+    const fromDefault = toYYYYMMDD(oneYearAgo);
+    const fromStr = fromQuery || fromDefault;
+    const toStr = toQuery || todayStr;
+    const numDays = Math.max(1, diffDays(fromStr, toStr) + 1);
+    return { fromStr, toStr, numDays };
+  }
   const now = new Date();
   now.setHours(12, 0, 0, 0);
   let fromStr;
@@ -155,8 +167,8 @@ function buildProfitLossTrend(invoicesInRange, expensesInRange, fromStr, toStr) 
   const to = new Date(toStr);
   const incomeByDate = {};
   invoicesInRange.forEach((inv) => {
-    const d = inv.paidDate;
-    incomeByDate[d] = (incomeByDate[d] || 0) + (inv.amount || 0);
+    const d = inv.paidDate || inv.issueDate;
+    if (d) incomeByDate[d] = (incomeByDate[d] || 0) + (inv.amount || 0);
   });
   const expenseByDate = {};
   expensesInRange.forEach((e) => {
@@ -232,8 +244,11 @@ function buildIncomeVsExpenses(invoicesInRange, expensesInRange, fromStr, toStr)
   const incomeByMonth = {};
   const expenseByMonth = {};
   invoicesInRange.forEach((inv) => {
-    const m = inv.paidDate.slice(0, 7);
-    incomeByMonth[m] = (incomeByMonth[m] || 0) + (inv.amount || 0);
+    const dateToUse = inv.paidDate || inv.issueDate;
+    if (dateToUse) {
+      const m = dateToUse.slice(0, 7);
+      incomeByMonth[m] = (incomeByMonth[m] || 0) + (inv.amount || 0);
+    }
   });
   expensesInRange.forEach((e) => {
     const m = e.date.slice(0, 7);
@@ -331,9 +346,11 @@ export const getReports = (req, res) => {
     const invoices = getInvoicesStore();
     const expenses = getExpensesStore();
 
-    const invoicesInRange = invoices.filter(
-      (i) => i.status === 'paid' && i.paidDate && inRange(i.paidDate, fromStr, toStr)
-    );
+    const invoicesInRange = invoices.filter((i) => {
+      if (i.status !== 'paid') return false;
+      const dateToUse = i.paidDate || i.issueDate;
+      return dateToUse && inRange(dateToUse, fromStr, toStr);
+    });
     const expensesInRange = expenses.filter((e) => inRange(e.date, fromStr, toStr));
 
     const totalIncome = invoicesInRange.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -351,9 +368,11 @@ export const getReports = (req, res) => {
 
     const prevFrom = toYYYYMMDD(addMonths(new Date(fromStr), -1));
     const prevTo = toYYYYMMDD(endOfMonth(addMonths(new Date(toStr), -1)));
-    const prevInvoices = invoices.filter(
-      (i) => i.status === 'paid' && i.paidDate && inRange(i.paidDate, prevFrom, prevTo)
-    );
+    const prevInvoices = invoices.filter((i) => {
+      if (i.status !== 'paid') return false;
+      const dateToUse = i.paidDate || i.issueDate;
+      return dateToUse && inRange(dateToUse, prevFrom, prevTo);
+    });
     const prevExpenses = expenses.filter((e) => inRange(e.date, prevFrom, prevTo));
     const prevIncome = prevInvoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
     const prevExpensesSum = prevExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -443,13 +462,27 @@ export const getReports = (req, res) => {
       };
     });
 
-    const budgetComparison = categoryDistribution.map((c) => ({
-      category: c.name,
-      budgeted: 0,
-      spent: c.value,
-      remaining: 0,
-      progress: 0,
-    }));
+    const budgetCategories = budget?.[0]?.categories ?? [];
+    const budgetByName = Object.fromEntries(budgetCategories.map((b) => [b.name, b]));
+    const expenseToBudgetMap = {
+      'Marketing & Advertising': 'Marketing',
+      'Office Expenses': 'Office',
+      'Software & Subscriptions': 'Software',
+      'Travel & Accommodation': 'Travel',
+      'Food & Dining': 'Miscellaneous',
+      'Fuel & Commute': 'Miscellaneous',
+      'Utilities': 'Miscellaneous',
+      'Insurance': 'Miscellaneous',
+      'Education & Training': 'Miscellaneous',
+    };
+    const budgetComparison = categoryDistribution.map((c) => {
+      const budgetCat = budgetByName[expenseToBudgetMap[c.name] || c.name] || budgetByName[c.name];
+      const budgeted = budgetCat ? budgetCat.budget : 0;
+      const spent = c.value;
+      const remaining = budgeted - spent;
+      const progress = budgeted > 0 ? (spent / budgeted) * 100 : 0;
+      return { category: c.name, budgeted, spent, remaining, progress };
+    });
 
     const reports = [
       {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import {
   Download,
@@ -70,6 +71,8 @@ import { SpendingHeatmap } from '@/components/spending-heatmap'
 
 import { DateRangeFilter } from '@/components/date-range-filter'
 import { getReports, type ReportsData } from '@/lib/services/reports'
+import { listCategories } from '@/lib/services/expenses'
+import { fetchPaymentMethods } from '@/lib/services/payment-methods'
 
 const CHART_COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#eab308', '#a855f7', '#6b7280']
 
@@ -141,31 +144,50 @@ const renderActiveShape = (props: ActiveShapeProps) => {
 }
 
 export default function ReportsPage() {
+  const searchParams = useSearchParams()
+  const initialSearch = searchParams.get('q') ?? ''
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [paymentFilter, setPaymentFilter] = useState('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(initialSearch)
   const [sortField, setSortField] = useState<'date' | 'amount' | 'merchant' | 'category' | 'payment'>('amount')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [trendPeriod, setTrendPeriod] = useState<'7D' | '30D' | '3M' | '1Y'>('30D')
   const [profitLossPeriod, setProfitLossPeriod] = useState<'7D' | '30D' | '3M' | '1Y'>('30D')
   const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined)
   const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [txPage, setTxPage] = useState(0)
+  const TX_PAGE_SIZE = 10
 
-  // Only send date range to API when both From and To are set
+  // Send date range to API when at least one date is set (fill missing with sensible defaults)
   const { data, isLoading, mutate } = useSWR<ReportsData>(
     ['reports', fromDate || null, toDate || null],
     ([, start, end]) => {
       const s = start as string | null
       const e = end as string | null
-      const hasBoth = s && e
-      return getReports(hasBoth ? { startDate: s, endDate: e, from: s, to: e } : undefined)
-    }
+      if (!s && !e) return getReports(undefined)
+      const today = new Date().toISOString().slice(0, 10)
+      const oneYearAgo = new Date()
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+      const fromDefault = oneYearAgo.toISOString().slice(0, 10)
+      const from = s ?? fromDefault
+      const to = e ?? today
+      return getReports({ range: 'custom', startDate: from, endDate: to, from, to })
+    },
+    { keepPreviousData: true }
   )
+
+  const { data: categories = [] } = useSWR('categories', listCategories)
+  const { data: paymentMethodsData } = useSWR('payment-methods', fetchPaymentMethods)
 
   const onPieEnter = useCallback((_: unknown, index: number) => setActivePieIndex(index), [])
   const onPieLeave = useCallback(() => setActivePieIndex(undefined), [])
+
+  useEffect(() => {
+    const q = searchParams.get('q')
+    if (q !== null) setSearchQuery(q)
+  }, [searchParams])
 
   const resetFilters = () => {
     setFromDate('')
@@ -197,8 +219,10 @@ export default function ReportsPage() {
 
   const filteredTransactions = useMemo(() => {
     let result = [...topTransactions]
-    if (fromDate && toDate) {
-      result = result.filter((t) => t.date >= fromDate && t.date <= toDate)
+    if (fromDate || toDate) {
+      const from = fromDate || '1970-01-01'
+      const to = toDate || '2099-12-31'
+      result = result.filter((t) => t.date >= from && t.date <= to)
     }
     if (categoryFilter !== 'all') {
       result = result.filter((t) => t.category.toLowerCase() === categoryFilter.toLowerCase())
@@ -224,6 +248,10 @@ export default function ReportsPage() {
     return result
   }, [topTransactions, fromDate, toDate, categoryFilter, paymentFilter, searchQuery, sortField, sortOrder])
 
+  useEffect(() => {
+    setTxPage(0)
+  }, [fromDate, toDate, categoryFilter, paymentFilter, searchQuery, sortField, sortOrder])
+
   const toggleSort = (field: 'date' | 'amount' | 'merchant' | 'category' | 'payment') => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
@@ -235,17 +263,21 @@ export default function ReportsPage() {
 
   const drilldownData = categoryDrilldown[selectedCategory]
 
-  // Category options from reports data (categoryDistribution)
+  // Category options from API (always populated); merge with any from reports for edge cases
   const categoryOptions = useMemo(() => {
-    const names = (categoryDistribution ?? []).map((c) => c.name).filter(Boolean)
-    return ['all', ...[...new Set(names)].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))]
-  }, [categoryDistribution])
+    const fromApi = (categories ?? []).map((c) => c.name).filter(Boolean)
+    const fromReports = (categoryDistribution ?? []).map((c) => c.name).filter(Boolean)
+    const all = [...new Set([...fromApi, ...fromReports])].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    return ['all', ...all]
+  }, [categories, categoryDistribution])
 
-  // Payment options from reports data (topTransactions)
+  // Payment options from API (always populated); merge with any from reports for edge cases
   const paymentOptions = useMemo(() => {
-    const methods = (topTransactions ?? []).map((t) => t.payment).filter(Boolean)
-    return ['all', ...[...new Set(methods)].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))]
-  }, [topTransactions])
+    const fromApi = (paymentMethodsData?.paymentMethods ?? []).map((p) => p.name).filter(Boolean)
+    const fromReports = (topTransactions ?? []).map((t) => t.payment).filter(Boolean)
+    const all = [...new Set([...fromApi, ...fromReports])].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    return ['all', ...all]
+  }, [paymentMethodsData, topTransactions])
 
   // Sync selectedCategory to first available drilldown when data loads or selection is invalid
   useEffect(() => {
@@ -296,7 +328,8 @@ export default function ReportsPage() {
     window.print()
   }, [])
 
-  if (isLoading || !data) {
+  // Only show skeleton when we have no data (never swap to skeleton on date filter change - keeps popover open)
+  if (!data) {
     return (
       <div className="p-6 lg:p-8 space-y-6">
         <Skeleton className="h-10 w-64" />
@@ -426,8 +459,9 @@ export default function ReportsPage() {
               {stats.netSavings >= 0 ? '+' : ''}${stats.netSavings.toLocaleString()}
             </p>
             <div className="flex items-center gap-1.5 mt-2">
-              <Badge variant="secondary" className="text-xs bg-blue-500/10 text-blue-600">
-                <TrendingUp className="h-3 w-3 mr-1" />+{stats.savingsChange}%
+              <Badge variant="secondary" className={cn("text-xs", stats.savingsChange >= 0 ? "bg-blue-500/10 text-blue-600" : "bg-rose-500/10 text-rose-600")}>
+                {stats.savingsChange >= 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
+                {stats.savingsChange >= 0 ? '+' : ''}{stats.savingsChange}%
               </Badge>
               <span className="text-xs text-muted-foreground">vs last month</span>
             </div>
@@ -864,7 +898,7 @@ export default function ReportsPage() {
                 <h4 className="text-sm font-medium mb-3">Weekly Trend</h4>
                 <div className="h-[200px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={drilldownData.weeklyData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                    <BarChart data={drilldownData.weeklyData ?? []} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                       <XAxis dataKey="week" axisLine={false} tickLine={false} tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
@@ -878,7 +912,7 @@ export default function ReportsPage() {
               <div>
                 <h4 className="text-sm font-medium mb-3">Top Merchants</h4>
                 <div className="space-y-2">
-                  {drilldownData.topMerchants.map((m, i) => (
+                  {(drilldownData.topMerchants ?? []).map((m, i) => (
                     <div key={m.name} className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors">
                       <div className="flex items-center gap-3">
                         <span className="text-xs font-medium text-muted-foreground w-5">{i + 1}</span>
@@ -895,11 +929,11 @@ export default function ReportsPage() {
             </div>
             <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border">
               <div className="text-center">
-                <p className="text-xl font-bold">${drilldownData.total.toLocaleString()}</p>
+                <p className="text-xl font-bold">${(drilldownData.total ?? 0).toLocaleString()}</p>
                 <p className="text-xs text-muted-foreground">Total Spent</p>
               </div>
               <div className="text-center">
-                <p className="text-xl font-bold">${drilldownData.avgTransaction.toLocaleString()}</p>
+                <p className="text-xl font-bold">${(drilldownData.avgTransaction ?? 0).toLocaleString()}</p>
                 <p className="text-xs text-muted-foreground">Avg Transaction</p>
               </div>
             </div>
@@ -1051,7 +1085,7 @@ export default function ReportsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredTransactions.slice(0, 10).map((t) => (
+              {filteredTransactions.slice(txPage * TX_PAGE_SIZE, txPage * TX_PAGE_SIZE + TX_PAGE_SIZE).map((t) => (
                 <TableRow key={t.id}>
                   <TableCell className="text-xs text-muted-foreground">{t.date}</TableCell>
                   <TableCell className="font-medium">{t.merchant}</TableCell>
@@ -1063,10 +1097,16 @@ export default function ReportsPage() {
             </TableBody>
           </Table>
           <div className="flex items-center justify-between p-4 border-t border-border">
-            <p className="text-xs text-muted-foreground">Showing {Math.min(10, filteredTransactions.length)} of {filteredTransactions.length} transactions</p>
+            <p className="text-xs text-muted-foreground">
+              Showing {filteredTransactions.length === 0 ? 0 : txPage * TX_PAGE_SIZE + 1}-{Math.min(txPage * TX_PAGE_SIZE + TX_PAGE_SIZE, filteredTransactions.length)} of {filteredTransactions.length} transactions
+            </p>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="h-8 w-8 bg-transparent" disabled><ChevronLeft className="h-4 w-4" /></Button>
-              <Button variant="outline" size="icon" className="h-8 w-8 bg-transparent" disabled><ChevronRight className="h-4 w-4" /></Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 bg-transparent" disabled={txPage <= 0} onClick={() => setTxPage((p) => Math.max(0, p - 1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 bg-transparent" disabled={txPage >= Math.ceil(filteredTransactions.length / TX_PAGE_SIZE) - 1} onClick={() => setTxPage((p) => Math.min(Math.ceil(filteredTransactions.length / TX_PAGE_SIZE) - 1, p + 1))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </CardContent>

@@ -26,7 +26,7 @@ export function IncomeExpenseChart() {
     ['charts', dateRange],
     () => getCharts(dateRange),
     {
-      revalidateOnFocus: false,
+      revalidateOnFocus: true,
       dedupingInterval: 5000,
     }
   )

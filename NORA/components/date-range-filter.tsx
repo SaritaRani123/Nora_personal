@@ -31,7 +31,8 @@ export function DateRangeFilter({
 }: DateRangeFilterProps) {
   const idFrom = React.useId()
   const idTo = React.useId()
-  const hasRange = Boolean(fromDate || toDate)
+  const hasRange = Boolean(fromDate && toDate)
+  const hasAnyDate = Boolean(fromDate || toDate)
 
   const clearDates = () => {
     onFromDateChange('')
@@ -39,7 +40,7 @@ export function DateRangeFilter({
   }
 
   return (
-    <Popover>
+    <Popover modal={false}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="bg-transparent">
           <Calendar className="mr-2 h-4 w-4" />
@@ -51,7 +52,24 @@ export function DateRangeFilter({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80" align="end">
+      <PopoverContent
+        className="w-80"
+        align="end"
+        onInteractOutside={(e) => {
+          // Keep popover open when native date picker is open (it renders outside, triggers "interact outside")
+          const active = document.activeElement as HTMLInputElement | null
+          if (active?.type === 'date') e.preventDefault()
+        }}
+        onPointerDownOutside={(e) => {
+          const active = document.activeElement as HTMLInputElement | null
+          if (active?.type === 'date') e.preventDefault()
+        }}
+        onFocusOutside={(e) => {
+          // Keep open when focus moves to native date picker (user selecting second date)
+          const active = document.activeElement as HTMLInputElement | null
+          if (active?.type === 'date') e.preventDefault()
+        }}
+      >
         <div className="space-y-4">
           <div className="space-y-2">
             <h4 className="font-medium text-sm">{title}</h4>
@@ -81,7 +99,7 @@ export function DateRangeFilter({
               />
             </div>
           </div>
-          {hasRange && (
+          {hasAnyDate && (
             <Button
               variant="outline"
               size="sm"

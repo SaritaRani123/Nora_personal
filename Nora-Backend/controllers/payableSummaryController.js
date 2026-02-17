@@ -1,4 +1,5 @@
-import { invoices, expenses } from '../data/mockData.js';
+import { getInvoicesStore } from './invoicesController.js';
+import { getExpensesStore } from './expensesController.js';
 
 // Helper to calculate days difference
 function getDaysDifference(date1, date2) {
@@ -39,6 +40,7 @@ function bucketRecordToArray(buckets) {
 // Calculate invoices payable buckets
 function calculateInvoicesPayable(today) {
   const buckets = createEmptyBuckets();
+  const invoices = getInvoicesStore();
 
   invoices.forEach(invoice => {
     if (invoice.status === 'paid') return;
@@ -62,6 +64,7 @@ function calculateInvoicesPayable(today) {
 // Calculate bills owing buckets
 function calculateBillsOwing(today) {
   const buckets = createEmptyBuckets();
+  const expenses = getExpensesStore();
 
   expenses.forEach(expense => {
     if (expense.status === 'paid') return;
