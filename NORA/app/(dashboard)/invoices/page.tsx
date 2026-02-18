@@ -67,6 +67,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import useSWR, { mutate } from 'swr'
 import { listInvoices, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
 import { listWorkDone, type WorkDoneEntry } from '@/lib/services/work-done'
+import { listTimeEntries, type TimeEntry } from '@/lib/services/time-entries'
 import { generateInvoicePDF } from '@/lib/invoices/generateInvoicePDF'
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -96,8 +97,35 @@ const InvoicesPage = () => {
   const { data: unbilledWork = [] } = useSWR<WorkDoneEntry[]>('work-done-unbilled', () =>
     listWorkDone({ unbilledOnly: true })
   )
+  const { data: unbilledTimeEntries = [] } = useSWR<TimeEntry[]>('time-entries-unbilled', () =>
+    listTimeEntries({ unbilledOnly: true })
+  )
 
   const [selectedUnbilledIds, setSelectedUnbilledIds] = useState<Set<string>>(new Set())
+
+  const unbilledRows = useMemo(() => {
+    const workRows = unbilledWork.map((w) => ({
+      id: w.id,
+      type: 'work' as const,
+      date: w.date,
+      contact: w.contact || '—',
+      description: w.description || '—',
+      hours: w.hours,
+      rate: w.rate,
+      amount: w.amount,
+    }))
+    const timeRows = unbilledTimeEntries.map((t) => ({
+      id: t.id,
+      type: 'time' as const,
+      date: t.date,
+      contact: t.contactId || '—',
+      description: t.description || t.invoiceItem || '—',
+      hours: Math.round((t.durationMinutes / 60) * 100) / 100,
+      rate: t.hourlyRate,
+      amount: t.amount,
+    }))
+    return [...workRows, ...timeRows]
+  }, [unbilledWork, unbilledTimeEntries])
 
   const toggleUnbilledSelection = (id: string) => {
     setSelectedUnbilledIds((prev) => {
@@ -108,15 +136,24 @@ const InvoicesPage = () => {
     })
   }
   const toggleAllUnbilled = () => {
-    if (selectedUnbilledIds.size === unbilledWork.length) setSelectedUnbilledIds(new Set())
-    else setSelectedUnbilledIds(new Set(unbilledWork.map((w) => w.id)))
+    if (selectedUnbilledIds.size === unbilledRows.length) setSelectedUnbilledIds(new Set())
+    else setSelectedUnbilledIds(new Set(unbilledRows.map((r) => r.id)))
   }
 
+  const selectedUnbilledSingleClient = useMemo(() => {
+    if (selectedUnbilledIds.size === 0) return true
+    const selectedRows = unbilledRows.filter((r) => selectedUnbilledIds.has(r.id))
+    const distinctClients = new Set(selectedRows.map((r) => r.contact))
+    return distinctClients.size <= 1
+  }, [unbilledRows, selectedUnbilledIds])
+
   const handleCreateInvoiceFromUnbilled = () => {
-    const selected = unbilledWork.filter((w) => selectedUnbilledIds.has(w.id))
-    if (selected.length === 0) return
+    const selectedWork = unbilledWork.filter((w) => selectedUnbilledIds.has(w.id))
+    const selectedTime = unbilledTimeEntries.filter((t) => selectedUnbilledIds.has(t.id))
+    if (selectedWork.length === 0 && selectedTime.length === 0) return
     try {
-      sessionStorage.setItem('unbilledWorkEntriesForInvoice', JSON.stringify(selected))
+      sessionStorage.setItem('unbilledWorkEntriesForInvoice', JSON.stringify(selectedWork))
+      sessionStorage.setItem('unbilledTimeEntriesForInvoice', JSON.stringify(selectedTime))
     } catch (_) {}
     router.push('/invoices/create?from=unbilled')
   }
@@ -282,16 +319,21 @@ const InvoicesPage = () => {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle>Unbilled Work</CardTitle>
-              <CardDescription>Work done from Calendar. Select items and create an invoice.</CardDescription>
+              <CardDescription>Work done and time entries from Calendar. Select items and create an invoice.</CardDescription>
             </div>
-            <Button
-              onClick={handleCreateInvoiceFromUnbilled}
-              disabled={selectedUnbilledIds.size === 0}
-              className="gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              Create Invoice
-            </Button>
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                onClick={handleCreateInvoiceFromUnbilled}
+                disabled={selectedUnbilledIds.size === 0 || !selectedUnbilledSingleClient}
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Create Invoice
+              </Button>
+              {selectedUnbilledIds.size > 0 && !selectedUnbilledSingleClient && (
+                <p className="text-sm text-destructive">Select items for one client only.</p>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -300,11 +342,12 @@ const InvoicesPage = () => {
               <TableRow>
                 <TableHead className="w-10">
                   <Checkbox
-                    checked={unbilledWork.length > 0 && selectedUnbilledIds.size === unbilledWork.length}
+                    checked={unbilledRows.length > 0 && selectedUnbilledIds.size === unbilledRows.length}
                     onCheckedChange={toggleAllUnbilled}
                     aria-label="Select all"
                   />
                 </TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Contact</TableHead>
                 <TableHead>Description</TableHead>
@@ -314,14 +357,14 @@ const InvoicesPage = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {unbilledWork.length === 0 ? (
+              {unbilledRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    No unbilled work. Add work on the Calendar page to see it here.
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    No unbilled work. Add work or time entries on the Calendar page to see them here.
                   </TableCell>
                 </TableRow>
               ) : (
-                unbilledWork.map((row) => (
+                unbilledRows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>
                       <Checkbox
@@ -330,9 +373,14 @@ const InvoicesPage = () => {
                         aria-label={`Select ${row.description}`}
                       />
                     </TableCell>
+                    <TableCell>
+                      <Badge variant={row.type === 'time' ? 'secondary' : 'outline'} className="text-xs">
+                        {row.type === 'time' ? 'Time' : 'Work'}
+                      </Badge>
+                    </TableCell>
                     <TableCell>{formatDate(row.date)}</TableCell>
-                    <TableCell>{row.contact || '—'}</TableCell>
-                    <TableCell>{row.description || '—'}</TableCell>
+                    <TableCell>{row.contact}</TableCell>
+                    <TableCell>{row.description}</TableCell>
                     <TableCell className="text-right">{row.hours}</TableCell>
                     <TableCell className="text-right">${row.rate.toLocaleString()}</TableCell>
                     <TableCell className="text-right font-medium">${row.amount.toLocaleString()}</TableCell>

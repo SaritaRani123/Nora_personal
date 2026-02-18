@@ -62,6 +62,37 @@ export const markWorkDoneAsInvoiced = (req, res) => {
   }
 };
 
+export const updateWorkDone = (req, res) => {
+  try {
+    const { id } = req.params;
+    const index = workDoneStore.findIndex((e) => e.id === id);
+    if (index === -1) {
+      return res.status(404).json({ error: 'Work done entry not found' });
+    }
+    const current = workDoneStore[index];
+    const body = req.body;
+    const date = body.date !== undefined ? body.date : current.date;
+    const contact = body.contact !== undefined ? body.contact : current.contact;
+    const description = body.description !== undefined ? body.description : current.description;
+    const hours = body.hours !== undefined ? Number(body.hours) : current.hours;
+    const rate = body.rate !== undefined ? Number(body.rate) : current.rate;
+    const amount = body.amount !== undefined ? Number(body.amount) : hours * rate;
+    const entry = {
+      ...current,
+      date,
+      contact,
+      description,
+      hours,
+      rate,
+      amount: Math.round(amount * 100) / 100,
+    };
+    workDoneStore[index] = entry;
+    res.json({ workDone: [entry] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const deleteWorkDone = (req, res) => {
   try {
     const { id } = req.params;

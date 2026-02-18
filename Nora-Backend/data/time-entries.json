@@ -1,0 +1,50 @@
+[
+  {
+    "id": "time-1771379026015",
+    "date": "2026-02-13",
+    "contactId": "John Smith",
+    "invoiceItem": "nn",
+    "description": "nn",
+    "hourlyRate": 60,
+    "durationMinutes": 9,
+    "amount": 9,
+    "invoiceId": null,
+    "timerStartedAt": null
+  },
+  {
+    "id": "time-1771378982276",
+    "date": "2026-02-26",
+    "contactId": "Emily Davis",
+    "invoiceItem": "mmm",
+    "description": "",
+    "hourlyRate": 60,
+    "durationMinutes": 0.25,
+    "amount": 0.25,
+    "invoiceId": null,
+    "timerStartedAt": null
+  },
+  {
+    "id": "time-1771378342593",
+    "date": "2026-03-05",
+    "contactId": "John Smith",
+    "invoiceItem": "m",
+    "description": "jjjj",
+    "hourlyRate": 30,
+    "durationMinutes": 630,
+    "amount": 315,
+    "invoiceId": null,
+    "timerStartedAt": null
+  },
+  {
+    "id": "time-1771372803885",
+    "date": "2026-02-25",
+    "contactId": "Michael Chen",
+    "invoiceItem": "kkkk",
+    "description": "kkkk",
+    "hourlyRate": 20,
+    "durationMinutes": 91,
+    "amount": 30.33,
+    "invoiceId": "INV-007",
+    "timerStartedAt": null
+  }
+]

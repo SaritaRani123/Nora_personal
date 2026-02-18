@@ -45,6 +45,23 @@ export async function createWorkDone(payload: CreateWorkDonePayload): Promise<Wo
   return extractArray<WorkDoneEntry>(body, 'workDone')
 }
 
+export interface UpdateWorkDonePayload {
+  date?: string
+  contact?: string
+  description?: string
+  hours?: number
+  rate?: number
+  amount?: number
+}
+
+export async function updateWorkDone(id: string, payload: UpdateWorkDonePayload): Promise<WorkDoneEntry[]> {
+  const body = await apiFetch(`/work-done/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  return extractArray<WorkDoneEntry>(body, 'workDone')
+}
+
 export async function markWorkDoneAsInvoiced(
   ids: string[],
   invoiceId: string

@@ -48,7 +48,7 @@ export const createExpense = (req, res) => {
       id: `exp-${Date.now()}`,
       date: req.body.date || new Date().toISOString().split('T')[0],
       description: req.body.description || '',
-      category: req.body.category || 'office',
+      category: req.body.category != null && req.body.category !== '' ? req.body.category : 'office',
       amount: req.body.amount || 0,
       paymentMethod: req.body.paymentMethod || getDefaultPaymentMethodName(),
       aiSuggested: req.body.aiSuggested ?? false,

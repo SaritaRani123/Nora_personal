@@ -189,9 +189,9 @@ export const appConfig = {
 /** Calendar entry types: id, label, iconKey, colorKey. Frontend maps keys to Lucide icons and Tailwind classes. Income, Invoice, Tax, Overdue excluded from Add Entry. */
 export const calendarEntryTypes = [
   { id: 'work', label: 'Work Done', iconKey: 'briefcase', colorKey: 'primary' },
-  { id: 'time', label: 'Time', iconKey: 'clock', colorKey: 'chart3' },
+  { id: 'time', label: 'Time', iconKey: 'clock', colorKey: 'chart4' },
   { id: 'expense', label: 'Expense', iconKey: 'receipt', colorKey: 'destructive' },
-  { id: 'meeting', label: 'Meeting', iconKey: 'users', colorKey: 'chart4' },
+  { id: 'meeting', label: 'Meeting', iconKey: 'users', colorKey: 'chart2' },
   { id: 'travel', label: 'Travels', iconKey: 'car', colorKey: 'chart5' },
   { id: 'note', label: 'Note', iconKey: 'fileText', colorKey: 'muted' },
 ];

@@ -72,6 +72,7 @@ import useSWR, { mutate } from 'swr'
 import { listContacts, createContact, type Contact as ApiContact } from '@/lib/services/contacts'
 import { listInvoices, createInvoice, updateInvoice, type Invoice } from '@/lib/services/invoices'
 import { markWorkDoneAsInvoiced } from '@/lib/services/work-done'
+import { markTimeEntriesAsInvoiced } from '@/lib/services/time-entries'
 import { HttpError } from '@/lib/api/http'
 import { generateInvoicePDFFromPayload, type InvoicePDFPayload } from '@/lib/invoices/generateInvoicePDF'
 import InvoicePreview from './components/InvoicePreview'
@@ -198,10 +199,31 @@ function CreateInvoiceContent() {
       return []
     }
   })
+  const [unbilledTimePreFill] = useState<Array<{ id: string; contactId: string; description: string; invoiceItem: string; durationMinutes: number; hourlyRate: number; amount: number }>>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const raw = sessionStorage.getItem('unbilledTimeEntriesForInvoice')
+      if (!raw) return []
+      const p = JSON.parse(raw)
+      return Array.isArray(p) ? p : []
+    } catch {
+      return []
+    }
+  })
   const fromWorkEntries = fromUnbilled ? unbilledPreFill.map((w) => ({ contact: w.contact, description: w.description, amount: w.amount, hours: w.hours, rate: w.rate })) : []
   const fromWorkIds = fromUnbilled ? unbilledPreFill.map((w) => w.id) : []
+  const fromTimeEntries = fromUnbilled ? unbilledTimePreFill.map((t) => ({
+    contact: t.contactId,
+    description: t.description || t.invoiceItem,
+    amount: t.amount,
+    hours: t.durationMinutes / 60,
+    rate: t.hourlyRate,
+  })) : []
+  const fromTimeIds = fromUnbilled ? unbilledTimePreFill.map((t) => t.id) : []
   const unbilledIdsRef = useRef<string[]>(fromWorkIds)
   unbilledIdsRef.current = fromWorkIds
+  const unbilledTimeIdsRef = useRef<string[]>(fromTimeIds)
+  unbilledTimeIdsRef.current = fromTimeIds
 
   // Step management
   const [currentStep, setCurrentStep] = useState<Step>('form')
@@ -264,9 +286,10 @@ function CreateInvoiceContent() {
         }
       }
     }
-    // Auto-fill contact from work done entries
-    if (fromWorkEntries.length > 0 && fromWorkEntries[0].contact) {
-      const contactName = fromWorkEntries[0].contact
+    // Auto-fill contact from work done or time entries
+    const firstEntry = fromWorkEntries[0] || fromTimeEntries[0]
+    if (firstEntry && firstEntry.contact) {
+      const contactName = firstEntry.contact
       const matchedContact = contacts.find(
         (c) => c.name.toLowerCase() === contactName.toLowerCase()
       )
@@ -327,9 +350,9 @@ function CreateInvoiceContent() {
         { id: '1', itemType: 'item', item: 'Invoice Amount', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: amount, taxId: null, description: '' },
       ]
     }
-    // Auto-fill line items from work done entries
-    if (fromWorkEntries.length > 0) {
-      return fromWorkEntries.map((entry, idx) => {
+    // Auto-fill line items from work done and time entries
+    if (fromWorkEntries.length > 0 || fromTimeEntries.length > 0) {
+      const workItems = fromWorkEntries.map((entry, idx) => {
         const hrs = entry.hours ?? 0
         return {
           id: String(idx + 1),
@@ -344,6 +367,22 @@ function CreateInvoiceContent() {
           description: entry.contact || 'Work',
         }
       })
+      const timeItems = fromTimeEntries.map((entry, idx) => {
+        const hrs = entry.hours ?? 0
+        return {
+          id: String(fromWorkEntries.length + idx + 1),
+          itemType: 'hourly' as ItemType,
+          item: entry.description || 'Time',
+          quantity: 1,
+          unit: 'hrs',
+          hours: Math.floor(hrs),
+          minutes: Math.round((hrs % 1) * 60),
+          price: entry.rate ?? 0,
+          taxId: null,
+          description: entry.contact || 'Time',
+        }
+      })
+      return [...workItems, ...timeItems]
     }
     return [
       { id: '1', itemType: 'item', item: '', quantity: 1, unit: 'pcs', hours: 0, minutes: 0, price: 0, taxId: null, description: '' },
@@ -935,10 +974,13 @@ function CreateInvoiceContent() {
     const newInvoiceId = created[0]?.id ?? newInvoiceData.id
     if (unbilledIdsRef.current.length > 0 && newInvoiceId) {
       await markWorkDoneAsInvoiced(unbilledIdsRef.current, newInvoiceId)
-      try {
-        sessionStorage.removeItem('unbilledWorkEntriesForInvoice')
-      } catch (_) {}
+      try { sessionStorage.removeItem('unbilledWorkEntriesForInvoice') } catch (_) {}
       await mutate('work-done-unbilled')
+    }
+    if (unbilledTimeIdsRef.current.length > 0 && newInvoiceId) {
+      await markTimeEntriesAsInvoiced(unbilledTimeIdsRef.current, newInvoiceId)
+      try { sessionStorage.removeItem('unbilledTimeEntriesForInvoice') } catch (_) {}
+      await mutate('time-entries-unbilled')
     }
     setIsSending(false)
     setIsSendModalOpen(false)
@@ -995,10 +1037,13 @@ function CreateInvoiceContent() {
         const newInvoiceId = created[0]?.id ?? invoiceData.id
         if (unbilledIdsRef.current.length > 0 && newInvoiceId) {
           await markWorkDoneAsInvoiced(unbilledIdsRef.current, newInvoiceId)
-          try {
-            sessionStorage.removeItem('unbilledWorkEntriesForInvoice')
-          } catch (_) {}
+          try { sessionStorage.removeItem('unbilledWorkEntriesForInvoice') } catch (_) {}
           await mutate('work-done-unbilled')
+        }
+        if (unbilledTimeIdsRef.current.length > 0 && newInvoiceId) {
+          await markTimeEntriesAsInvoiced(unbilledTimeIdsRef.current, newInvoiceId)
+          try { sessionStorage.removeItem('unbilledTimeEntriesForInvoice') } catch (_) {}
+          await mutate('time-entries-unbilled')
         }
       }
       router.push('/invoices')

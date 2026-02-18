@@ -69,6 +69,13 @@ type TransactionDetail = {
 
 type UploadStatus = 'idle' | 'selected' | 'uploading' | 'processing' | 'completed' | 'error'
 
+// Helper function to parse date string (YYYY-MM-DD) as local date, not UTC
+// This prevents timezone conversion issues when displaying dates
+function parseLocalDate(dateString: string): Date {
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
 export default function StatementsPage() {
   const { data, isLoading, mutate } = useSWR<StatementsData>('statements', getStatementsWithStats)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -318,13 +325,13 @@ export default function StatementsPage() {
       return false
     }
 
-    const uploadDate = new Date(statement.uploadDate)
+    const uploadDate = parseLocalDate(statement.uploadDate)
     if (fromDate) {
-      const from = new Date(fromDate)
+      const from = parseLocalDate(fromDate)
       if (uploadDate < from) return false
     }
     if (toDate) {
-      const to = new Date(toDate)
+      const to = parseLocalDate(toDate)
       to.setHours(23, 59, 59, 999)
       if (uploadDate > to) return false
     }
@@ -718,7 +725,7 @@ export default function StatementsPage() {
                         {statement.accountType}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {new Date(statement.uploadDate).toLocaleDateString('en-US', {
+                        {parseLocalDate(statement.uploadDate).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
@@ -771,7 +778,7 @@ export default function StatementsPage() {
                       viewTransactionsList.map((txn) => (
                         <TableRow key={txn.id} className="hover:bg-muted/30">
                           <TableCell className="text-muted-foreground">
-                            {new Date(txn.date).toLocaleDateString('en-US', {
+                            {parseLocalDate(txn.date).toLocaleDateString('en-US', {
                               month: 'short',
                               day: 'numeric',
                               year: 'numeric',
@@ -853,7 +860,7 @@ export default function StatementsPage() {
                         ${txn.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {new Date(txn.date).toLocaleDateString('en-US', {
+                        {parseLocalDate(txn.date).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',

@@ -11,6 +11,15 @@ export const upload = multer({
 // In-memory store (replace with database in production)
 let statementsStore = statements.map((s) => ({ ...s }));
 
+// Helper function to get local date string (YYYY-MM-DD) without timezone conversion issues
+function getLocalDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function getStats() {
   return [{
     totalStatements: statementsStore.length,
@@ -62,7 +71,7 @@ export const uploadStatement = (req, res) => {
     const newStatement = {
       id: newId,
       fileName: req.file.originalname || 'uploaded.pdf',
-      uploadDate: new Date().toISOString().split('T')[0],
+      uploadDate: getLocalDateString(),
       status: 'completed',
       transactions: transactionsList.length,
       bank,
@@ -87,7 +96,7 @@ export const saveStatement = (req, res) => {
     const newStatement = {
       id: newId,
       fileName: fileName || 'uploaded.pdf',
-      uploadDate: new Date().toISOString().split('T')[0],
+      uploadDate: getLocalDateString(),
       status: 'completed',
       transactions: list.length,
       bank: bank || 'Scotiabank',

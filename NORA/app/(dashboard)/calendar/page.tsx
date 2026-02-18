@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import useSWR, { mutate } from 'swr'
 import {
   formatDateToLocal,
@@ -108,7 +108,22 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
 import { useToast } from '@/hooks/use-toast'
-import { listWorkDone, createWorkDone, deleteWorkDone, type WorkDoneEntry } from '@/lib/services/work-done'
+import { listWorkDone, createWorkDone, updateWorkDone, deleteWorkDone, type WorkDoneEntry } from '@/lib/services/work-done'
+import { listTravel, createTravel, updateTravel, deleteTravel, type TravelEntry } from '@/lib/services/travel'
+import {
+  listTimeEntries,
+  createTimeEntry,
+  updateTimeEntry,
+  deleteTimeEntry,
+  type TimeEntry,
+} from '@/lib/services/time-entries'
+import {
+  listMeetings,
+  createMeeting,
+  updateMeeting,
+  deleteMeeting,
+  type Meeting,
+} from '@/lib/services/meetings'
 import { getPaymentMethodById, listExpenseCategories } from '@/lib/services/expense-service'
 import type { ExpenseCreatePayload, ExpenseUpdatePayload } from '@/types/expense'
 
@@ -146,7 +161,23 @@ const COLOR_MAP: Record<string, { color: string; dotColor: string }> = {
 }
 const DEFAULT_DISPLAY = { icon: FileText, color: 'bg-muted text-muted-foreground', dotColor: 'bg-muted-foreground' }
 
+// One color per event type (applies everywhere: month/week/agenda + legend). No two types share a color.
+const EVENT_TYPE_COLORS: Record<string, keyof typeof COLOR_MAP> = {
+  expense: 'destructive',  // red
+  time: 'chart4',
+  meeting: 'chart2',
+  work: 'primary',
+  travel: 'chart5',
+  note: 'muted',
+}
+
 function getEventTypeDisplay(entryTypes: CalendarEntryType[], typeId: string): { icon: typeof Briefcase; color: string; dotColor: string } {
+  const colorKey = EVENT_TYPE_COLORS[typeId]
+  if (colorKey) {
+    const colors = COLOR_MAP[colorKey] ?? { color: DEFAULT_DISPLAY.color, dotColor: DEFAULT_DISPLAY.dotColor }
+    const iconKey = typeId === 'expense' ? 'receipt' : typeId === 'time' ? 'clock' : typeId === 'meeting' ? 'users' : typeId === 'work' ? 'briefcase' : typeId === 'travel' ? 'car' : 'fileText'
+    return { icon: ICON_MAP[iconKey] ?? DEFAULT_DISPLAY.icon, color: colors.color, dotColor: colors.dotColor }
+  }
   const t = entryTypes.find((e) => e.id === typeId)
   if (!t) return DEFAULT_DISPLAY
   const icon = ICON_MAP[t.iconKey] ?? DEFAULT_DISPLAY.icon
@@ -196,6 +227,23 @@ interface CalendarEvent {
   paymentMethod?: string
   taxDeductible?: boolean
   notes?: string
+  /** For time entries: invoice item/service name */
+  invoiceItem?: string
+  /** For time entries: hourly rate ($); used in edit form and save */
+  hourlyRate?: number
+  /** For time entries: minutes part of duration (hours in event.hours) */
+  minutes?: number
+  /** Full work-done data when type === 'work' (for edit form prefill) */
+  workEntry?: WorkDoneEntry
+  /** Full travel data when type === 'travel' (for edit form prefill) */
+  travelEntry?: TravelEntry
+  /** Full time entry when type === 'time' (for edit form prefill / timer resume) */
+  timeEntry?: TimeEntry
+  /** Full meeting data when type === 'meeting' (for edit form prefill) */
+  meetingEntry?: Meeting
+  /** Meeting/time slot when type === 'meeting' */
+  startTime?: string
+  endTime?: string
 }
 
 // Upcoming event type configuration (derived from API data)
@@ -204,6 +252,7 @@ const upcomingTypeConfig = {
   overdue: { label: 'Overdue', icon: AlertTriangle, color: 'text-destructive' },
   income: { label: 'Income', icon: DollarSign, color: 'text-success' },
   expense: { label: 'Expense', icon: Receipt, color: 'text-destructive' },
+  meeting: { label: 'Meeting', icon: CalendarClock, color: 'text-primary' },
 }
 
 // Helper: get category display name from id (uses categories from API)
@@ -289,6 +338,45 @@ export default function CalendarPage() {
     workDoneFetcher
   )
 
+  // Fetch travel entries for calendar view range (from backend)
+  const travelFetcher = useCallback(
+    () => listTravel({ from: viewStartDate, to: viewEndDate }),
+    [viewStartDate, viewEndDate]
+  )
+  const { data: travelList = [], mutate: mutateTravel } = useSWR<TravelEntry[]>(
+    `travel-${viewStartDate}-${viewEndDate}`,
+    travelFetcher
+  )
+
+  // Fetch time entries for calendar view range (from backend)
+  const timeEntriesFetcher = useCallback(
+    () => listTimeEntries({ from: viewStartDate, to: viewEndDate }),
+    [viewStartDate, viewEndDate]
+  )
+  const { data: timeEntriesList = [], mutate: mutateTimeEntries } = useSWR<TimeEntry[]>(
+    `time-entries-${viewStartDate}-${viewEndDate}`,
+    timeEntriesFetcher
+  )
+
+  // Fetch meetings for calendar view range (from backend)
+  const meetingsFetcher = useCallback(
+    () => listMeetings({ from: viewStartDate, to: viewEndDate }),
+    [viewStartDate, viewEndDate]
+  )
+  const { data: meetingsList = [], mutate: mutateMeetings } = useSWR<Meeting[]>(
+    `meetings-${viewStartDate}-${viewEndDate}`,
+    meetingsFetcher
+  )
+
+  // Fetch upcoming meetings (from today through next 31 days) for Upcoming sidebar list
+  const upcomingMeetingsFetcher = useCallback(() => {
+    const t = new Date()
+    const from = formatDateToLocal(t)
+    const to = formatDateToLocal(new Date(t.getTime() + 31 * 24 * 60 * 60 * 1000))
+    return listMeetings({ from, to })
+  }, [])
+  const { data: upcomingMeetingsList = [] } = useSWR<Meeting[]>('upcoming-meetings', upcomingMeetingsFetcher)
+
   // Calendar summary (Work, Expenses, Income, Net) from backend for current view range
   const calendarSummaryFetcher = useCallback(
     () => fetchCalendarSummary(viewStartDate, viewEndDate),
@@ -309,6 +397,17 @@ export default function CalendarPage() {
       return appConfig.defaultCategoryId
     return categories[0]?.id ?? ''
   }, [appConfig?.defaultCategoryId, categories])
+
+  // Prefer "Travel & Accommodation" (or "Travel") for expenses created from Travel "Track as expense"
+  const travelCategoryId = useMemo(() => {
+    const travelCat = categories.find(
+      (c) =>
+        c.id === 'travel' ||
+        c.name?.toLowerCase().includes('travel') ||
+        c.name?.toLowerCase().includes('accommodation')
+    )
+    return travelCat?.id ?? defaultCategoryId
+  }, [categories, defaultCategoryId])
 
   const { data: paymentMethodsData } = useSWR('payment-methods', fetchPaymentMethods)
   const paymentMethods = paymentMethodsData?.paymentMethods ?? []
@@ -372,7 +471,7 @@ export default function CalendarPage() {
       }
     })
 
-    // Map work-done from backend to calendar events (same date as saved)
+    // Map work-done from backend to calendar events (include workEntry for edit form prefill)
     workDoneList.forEach((w) => {
       events.push({
         id: w.id,
@@ -382,14 +481,71 @@ export default function CalendarPage() {
         amount: w.amount,
         client: w.contact || undefined,
         hours: w.hours,
+        workEntry: w,
       })
     })
 
-    // Add local events (meetings, travel, note, etc. - not work; work comes from API)
+    // Map travel entries from backend to calendar events (include full travelEntry for edit)
+    travelList.forEach((t) => {
+      const title = t.fromAddress && t.toAddress
+        ? `${t.fromAddress} → ${t.toAddress}`
+        : t.notes || 'Travel'
+      events.push({
+        id: t.id,
+        title,
+        date: t.date,
+        type: 'travel',
+        amount: t.total,
+        client: t.billTo || undefined,
+        notes: t.notes || undefined,
+        travelEntry: t,
+      })
+    })
+
+    // Map time entries from backend to calendar events (include timeEntry for edit / timer)
+    // Use integer hours and remainder minutes so edit form Save computes durationMinutes correctly (hours*60 + minutes)
+    timeEntriesList.forEach((te) => {
+      const hours = Math.floor(te.durationMinutes / 60)
+      const mins = Math.round(te.durationMinutes % 60)
+      const title = te.description || te.invoiceItem || `Time ${hours}h ${mins}m`
+      events.push({
+        id: te.id,
+        title,
+        date: te.date,
+        type: 'time',
+        amount: te.amount,
+        client: te.contactId || undefined,
+        hours,
+        minutes: mins,
+        hourlyRate: te.hourlyRate,
+        invoiceItem: te.invoiceItem || undefined,
+        notes: te.description || undefined,
+        timeEntry: te,
+      })
+    })
+
+    // Map meetings from backend to calendar events (include meetingEntry for edit)
+    meetingsList.forEach((m) => {
+      const timeLabel = m.startTime || m.endTime ? [m.startTime, m.endTime].filter(Boolean).join(' – ') : ''
+      const title = m.title || 'Meeting'
+      events.push({
+        id: m.id,
+        title: timeLabel ? `${title} (${timeLabel})` : title,
+        date: m.date,
+        type: 'meeting',
+        client: m.contactId || undefined,
+        notes: m.notes || undefined,
+        startTime: m.startTime,
+        endTime: m.endTime,
+        meetingEntry: m,
+      })
+    })
+
+    // Add local events (note etc. - meetings come from API)
     events.push(...localEvents)
 
     return events
-  }, [expenses, invoices, workDoneList, localEvents, isLoading])
+  }, [expenses, invoices, workDoneList, travelList, timeEntriesList, meetingsList, localEvents, isLoading])
 
   // State for adding new client inline
   const [isAddingClient, setIsAddingClient] = useState(false)
@@ -448,6 +604,7 @@ const [newEntry, setNewEntry] = useState({
   client: '',
   amount: '',
   hours: '',
+  minutes: '',
   kilometers: '',
   kmRate: '',
   category: '',
@@ -458,7 +615,150 @@ const [newEntry, setNewEntry] = useState({
   startTime: '',
   endTime: '',
   vendor: '',
+  invoiceItem: '',
   })
+
+  // When Add Time sheet is open, also fetch all time entries to detect running timer (may be outside view range)
+  const { data: timeEntriesAll = [], mutate: mutateTimeEntriesAll } = useSWR<TimeEntry[]>(
+    isAddEventOpen && newEntry.type === 'time' ? 'time-entries-all' : null,
+    () => listTimeEntries()
+  )
+  const timeEntriesForTimer = isAddEventOpen && newEntry.type === 'time' ? timeEntriesAll : timeEntriesList
+
+  // Travel entry form (Momenteo-style): used when newEntry.type === 'travel'
+  const [travelForm, setTravelForm] = useState({
+    fromAddress: '',
+    toAddress: '',
+    roundTrip: false,
+    stops: [] as string[],
+    distance: '',
+    rate: '',
+    taxes: '',
+    notes: '',
+  })
+
+  // Edit sheet: travel form state (prefilled when editing a travel entry)
+  const [editTravelForm, setEditTravelForm] = useState({
+    fromAddress: '',
+    toAddress: '',
+    roundTrip: false,
+    stops: [] as string[],
+    billTo: '',
+    distance: '',
+    rate: '',
+    taxes: '',
+    notes: '',
+  })
+
+  // Prefill edit travel form when opening a travel entry for edit
+  useEffect(() => {
+    if (editingEvent?.type === 'travel' && editingEvent.travelEntry) {
+      const t = editingEvent.travelEntry
+      setEditTravelForm({
+        fromAddress: t.fromAddress ?? '',
+        toAddress: t.toAddress ?? '',
+        roundTrip: Boolean(t.roundTrip),
+        stops: Array.isArray(t.stops) ? [...t.stops] : [],
+        billTo: t.billTo ?? '',
+        distance: t.distance !== undefined && t.distance !== null ? String(t.distance) : '',
+        rate: t.rate !== undefined && t.rate !== null ? String(t.rate) : '',
+        taxes: t.taxes !== undefined && t.taxes !== null ? String(t.taxes) : '',
+        notes: t.notes ?? '',
+      })
+    }
+  }, [editingEvent?.id, editingEvent?.type, editingEvent?.travelEntry])
+
+  /*
+   * Time entry workflow (manual + timer)
+   * ------------------------------------
+   * 1. Saving: A Time entry can be saved by entering Hours/Minutes OR by using the timer.
+   *    Click Save with manual time, or start the timer and Save (elapsed is included).
+   * 2. Only one timer runs at a time (backend clears timerStartedAt on other entries when one starts).
+   * 3. If you open Add → Time on another date while a timer is already running:
+   *    - Do NOT attach the running timer to the new date.
+   *    - Show banner: "A timer is already running for [client] on [date]" with:
+   *      Resume = open the original running entry in this form (same date/client, timer keeps running).
+   *      Stop timer = stop and apply elapsed time to the original entry, clear timerStartedAt.
+   *      Discard = cancel running timer (clear timerStartedAt, do not add elapsed to duration).
+   * 4. Timer state is stored in backend (timerStartedAt on the Time entry). On reload, elapsed = now - timerStartedAt.
+   * 5. On Stop timer: compute elapsed, update durationMinutes, set timerStartedAt = null; user can then Save or edit and Save.
+   */
+  const [timeEntryId, setTimeEntryId] = useState<string | null>(null)
+  const [timerStartedAt, setTimerStartedAt] = useState<string | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerStartTimeRef = useRef<number | null>(null)
+
+  // Running timer from backend (only one globally). Do NOT auto-attach to current form — show banner instead.
+  const runningTimeEntryFromServer = timeEntriesForTimer.find((te) => te.timerStartedAt)
+  const isFormShowingRunningEntry = timeEntryId !== null && runningTimeEntryFromServer?.id === timeEntryId
+  const effectiveTimerStartedAt = isFormShowingRunningEntry
+    ? (timerStartedAt || runningTimeEntryFromServer?.timerStartedAt || null)
+    : null
+  const anotherTimerRunningBanner = newEntry.type === 'time' && runningTimeEntryFromServer && !isFormShowingRunningEntry
+
+  // Elapsed ticker: run every second when this form is showing the running entry
+  useEffect(() => {
+    if (!effectiveTimerStartedAt) {
+      if (!isFormShowingRunningEntry) {
+        timerStartTimeRef.current = null
+        setElapsedSeconds(0)
+      }
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current)
+        timerIntervalRef.current = null
+      }
+      return
+    }
+    const startMs = timerStartTimeRef.current ?? new Date(effectiveTimerStartedAt).getTime()
+    if (timerStartTimeRef.current === null) timerStartTimeRef.current = startMs
+
+    const tick = () => {
+      const start = timerStartTimeRef.current
+      if (start == null) return
+      setElapsedSeconds(Math.floor((Date.now() - start) / 1000))
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    timerIntervalRef.current = id
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
+  }, [effectiveTimerStartedAt, isFormShowingRunningEntry])
+
+  // Edit sheet: live timer when editing a time entry that has a running timer
+  const [editTimerElapsedSeconds, setEditTimerElapsedSeconds] = useState(0)
+  const editTimerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const editTimerStartMsRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!isEditSheetOpen || editingEvent?.type !== 'time' || !editingEvent?.timeEntry?.timerStartedAt) {
+      if (editTimerIntervalRef.current) {
+        clearInterval(editTimerIntervalRef.current)
+        editTimerIntervalRef.current = null
+      }
+      editTimerStartMsRef.current = null
+      setEditTimerElapsedSeconds(0)
+      return
+    }
+    const startMs = new Date(editingEvent.timeEntry.timerStartedAt).getTime()
+    editTimerStartMsRef.current = startMs
+
+    const tick = () => {
+      const start = editTimerStartMsRef.current
+      if (start == null) return
+      setEditTimerElapsedSeconds(Math.floor((Date.now() - start) / 1000))
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    editTimerIntervalRef.current = id
+    return () => {
+      if (editTimerIntervalRef.current) clearInterval(editTimerIntervalRef.current)
+      editTimerIntervalRef.current = null
+      editTimerStartMsRef.current = null
+    }
+  }, [isEditSheetOpen, editingEvent?.id, editingEvent?.type, editingEvent?.timeEntry?.timerStartedAt])
 
   const [activeFilters, setActiveFilters] = useState<string[]>([])
 
@@ -653,25 +953,27 @@ if (event.type === 'expense' && event.amount) {
     }
   }, [month, year, calendarEvents, filters])
 
-  // Get upcoming events sorted by urgency - derived from real invoice data
-// Get upcoming events sorted by urgency - derived from API data
+  // Get upcoming events sorted by urgency (invoices) and date/time (meetings) - derived from API data
   const sortedUpcomingEvents = useMemo(() => {
     if (isLoading) return []
-    
+
     const today = new Date()
+    const todayStr = formatDateToLocal(today)
     const upcomingEvents: Array<{
       id: string
       title: string
       date: string
       type: string
-      amount: number
+      amount?: number
       client?: string
       status?: string
       daysUntil: number
       urgency: 'overdue' | 'due_soon' | 'upcoming'
+      timeLabel?: string
+      startTime?: string
     }> = []
-    
-    // Add pending/overdue invoices from /api/invoices as upcoming events
+
+    // Add pending/overdue invoices from /api/invoices as upcoming events (unchanged)
     invoices.forEach((invoice) => {
       if (invoice.status === 'pending' || invoice.status === 'overdue') {
         const eventDate = new Date(invoice.dueDate)
@@ -679,7 +981,7 @@ if (event.type === 'expense' && event.amount) {
         let urgency: 'overdue' | 'due_soon' | 'upcoming' = 'upcoming'
         if (daysUntil < 0 || invoice.status === 'overdue') urgency = 'overdue'
         else if (daysUntil <= 7) urgency = 'due_soon'
-        
+
         upcomingEvents.push({
           id: `upcoming-invoice-${invoice.id}`,
           title: `Invoice ${invoice.id}`,
@@ -693,15 +995,36 @@ if (event.type === 'expense' && event.amount) {
         })
       }
     })
-    
+
+    // Add upcoming meetings from backend (date >= today)
+    upcomingMeetingsList.forEach((m) => {
+      if (m.date < todayStr) return
+      const eventDate = new Date(m.date)
+      const daysUntil = Math.ceil((eventDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      const timeLabel = [m.startTime, m.endTime].filter(Boolean).length
+        ? [m.startTime, m.endTime].filter(Boolean).join(' – ')
+        : undefined
+      upcomingEvents.push({
+        id: `upcoming-meeting-${m.id}`,
+        title: m.title || 'Meeting',
+        date: m.date,
+        type: 'meeting',
+        daysUntil,
+        urgency: 'upcoming',
+        timeLabel,
+        startTime: m.startTime || '',
+      })
+    })
+
     return upcomingEvents.sort((a, b) => {
       const urgencyOrder = { overdue: 0, due_soon: 1, upcoming: 2 }
       if (urgencyOrder[a.urgency] !== urgencyOrder[b.urgency]) {
         return urgencyOrder[a.urgency] - urgencyOrder[b.urgency]
       }
-      return a.daysUntil - b.daysUntil
+      if (a.date !== b.date) return a.date.localeCompare(b.date)
+      return (a.startTime || '').localeCompare(b.startTime || '')
     })
-  }, [invoices, isLoading])
+  }, [invoices, isLoading, upcomingMeetingsList])
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     if (viewMode === 'month') {
@@ -781,11 +1104,134 @@ const activeFilterCount =
   (filters.taxDeductible !== null ? 1 : 0)
 
 const handleAddEntry = async () => {
+  const eventDate = selectedDate ? formatDateToLocal(selectedDate) : formatDateToLocal(new Date())
+
+  // Handle time type - use time-entries API (persists on backend; appears on calendar and Unbilled Work)
+  if (newEntry.type === 'time') {
+    const hoursNum = newEntry.hours !== '' && !Number.isNaN(parseFloat(newEntry.hours)) ? parseFloat(newEntry.hours) : 0
+    const minutesNum = newEntry.minutes !== '' && !Number.isNaN(parseFloat(newEntry.minutes)) ? parseFloat(newEntry.minutes) : 0
+    const manualMinutes = Math.round(hoursNum * 60 + minutesNum)
+    // If timer is running, total = existing entry duration + elapsed (fractional for seconds); otherwise use manual
+    let durationMinutes: number
+    if (timeEntryId && effectiveTimerStartedAt) {
+      const previousDuration = timeEntriesForTimer.find((te) => te.id === timeEntryId)?.durationMinutes ?? 0
+      durationMinutes = previousDuration + elapsedSeconds / 60
+    } else {
+      durationMinutes = manualMinutes
+    }
+    if (durationMinutes <= 0) {
+      toast({
+        title: 'Enter time',
+        description: 'Enter hours/minutes or use the timer.',
+        variant: 'destructive',
+      })
+      return
+    }
+    const hourlyRate = newEntry.amount !== '' && !Number.isNaN(parseFloat(newEntry.amount)) ? parseFloat(newEntry.amount) : (calendarConfig?.defaultHourlyRate ?? 0)
+    const amount = (durationMinutes / 60) * hourlyRate
+    const payload = {
+      date: eventDate,
+      contactId: newEntry.client || '',
+      invoiceItem: newEntry.invoiceItem || '',
+      description: newEntry.title || newEntry.notes || '',
+      hourlyRate,
+      durationMinutes,
+      amount: Math.round(amount * 100) / 100,
+      invoiceId: null,
+      timerStartedAt: null,
+    }
+    try {
+      if (timeEntryId) {
+        await updateTimeEntry(timeEntryId, payload)
+        mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+        mutateTimeEntries()
+        mutateTimeEntriesAll()
+      } else {
+        const created = await createTimeEntry(payload)
+        mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+        mutateTimeEntries()
+        mutateTimeEntriesAll()
+        if (created[0]) setTimeEntryId(created[0].id)
+      }
+      mutate('time-entries-unbilled')
+      mutateCalendarSummary()
+      toast({ title: 'Time entry saved', description: 'Saved to calendar and available under Invoices → Unbilled Work.' })
+      setIsAddEventOpen(false)
+      setTimeEntryId(null)
+      setTimerStartedAt(null)
+      resetNewEntry()
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to save time entry', variant: 'destructive' })
+    }
+    return
+  }
+
+  // Handle travel type - use the travel API (POST /travel); when "Track as expense (no client)" also create expense (POST /expenses)
+  if (newEntry.type === 'travel') {
+    const fromAddress = travelForm.fromAddress.trim()
+    const toAddress = travelForm.toAddress.trim()
+    const distance = travelForm.distance !== '' && !Number.isNaN(parseFloat(travelForm.distance)) ? parseFloat(travelForm.distance) : 0
+    const defaultRate = calendarConfig?.defaultKmRate ?? 0.58
+    const rate = travelForm.rate !== '' && !Number.isNaN(parseFloat(travelForm.rate)) ? parseFloat(travelForm.rate) : defaultRate
+    const taxes = travelForm.taxes !== '' && !Number.isNaN(parseFloat(travelForm.taxes)) ? parseFloat(travelForm.taxes) : 0
+    const travelTotal = distance * rate * (travelForm.roundTrip ? 2 : 1) + taxes
+    const hasTravelContent = fromAddress || toAddress || distance > 0 || travelForm.notes.trim()
+    if (!hasTravelContent) {
+      toast({ title: 'Missing details', description: 'Enter at least From address, To address, Distance, or Notes.', variant: 'destructive' })
+      return
+    }
+    try {
+      await createTravel({
+        date: eventDate,
+        fromAddress,
+        toAddress,
+        roundTrip: travelForm.roundTrip,
+        stops: travelForm.stops,
+        billTo: newEntry.client || '',
+        distance,
+        rate,
+        taxes: taxes || undefined,
+        notes: travelForm.notes.trim() || undefined,
+      })
+      mutate(`travel-${viewStartDate}-${viewEndDate}`)
+      mutateTravel()
+      mutateCalendarSummary()
+      // When "Track as expense (no client)" (no billTo), also create an expense so it appears on Expenses page
+      const trackAsExpense = !newEntry.client || newEntry.client === '__none__'
+      if (trackAsExpense) {
+        try {
+          const description = fromAddress && toAddress ? `Travel: ${fromAddress} → ${toAddress}` : travelForm.notes.trim() || 'Travel'
+          await createExpenseAPI({
+            date: eventDate,
+            description,
+            category: travelCategoryId,
+            amount: Math.round(travelTotal * 100) / 100,
+            paymentMethod: defaultPaymentMethodName,
+            source: 'calendar',
+          })
+          mutate(`expenses-${viewStartDate}-${viewEndDate}`)
+          mutate((k: unknown) => Array.isArray(k) && (k as unknown[])[0] === 'expenses')
+          mutate('expenses')
+          mutate('payable-summary')
+          mutate((k: unknown) => Array.isArray(k) && (k as unknown[])[0] === 'charts')
+        } catch (expenseErr) {
+          toast({ title: 'Travel saved', description: 'Expense could not be created; check Expenses page.', variant: 'destructive' })
+        }
+      }
+      toast({ title: 'Travel entry added', description: trackAsExpense ? 'Saved to calendar and Expenses.' : 'Saved to calendar and will persist on refresh.' })
+      setIsAddEventOpen(false)
+      resetNewEntry()
+      resetTravelForm()
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to save travel entry', variant: 'destructive' })
+    }
+    return
+  }
+
   // For note type, title can be optional if notes are provided
   const hasContent = newEntry.title || (newEntry.type === 'note' && newEntry.notes)
   
   if (hasContent) {
-    const eventDate = selectedDate ? formatDateToLocal(selectedDate) : formatDateToLocal(new Date())
     
     // Handle expense type - use the expenses API
     if (newEntry.type === 'expense') {
@@ -800,11 +1246,12 @@ const handleAddEntry = async () => {
       
       try {
         await createExpenseAPI(expensePayload)
-        // Revalidate expenses cache
+        // Revalidate expenses cache (calendar + Expenses page key ['expenses', dateKey])
         mutate(`expenses-${viewStartDate}-${viewEndDate}`)
+        mutate((k: unknown) => Array.isArray(k) && (k as unknown[])[0] === 'expenses')
         mutate('expenses')
         mutate('payable-summary')
-        mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
+        mutate((k: unknown) => Array.isArray(k) && (k as unknown[])[0] === 'charts')
         mutateCalendarSummary()
         toast({
           title: 'Expense added',
@@ -814,42 +1261,6 @@ const handleAddEntry = async () => {
         toast({
           title: 'Error',
           description: 'Failed to add expense',
-          variant: 'destructive',
-        })
-      }
-    }
-    // Handle travel type - use the expenses API with travel category
-    else if (newEntry.type === 'travel') {
-      const defaultKm = calendarConfig?.defaultKmRate ?? 0.58
-      const kmRate = newEntry.kmRate !== '' && !Number.isNaN(parseFloat(newEntry.kmRate)) ? parseFloat(newEntry.kmRate) : defaultKm
-      const distance = newEntry.kilometers ? parseFloat(newEntry.kilometers) : 0
-      const calculatedAmount = newEntry.amount ? parseFloat(newEntry.amount) : distance * kmRate
-      
-      const expensePayload = {
-        date: eventDate,
-        description: newEntry.title || 'Travel',
-        category: 'travel',
-        amount: calculatedAmount,
-        paymentMethod: newEntry.paymentMethod || defaultPaymentMethodName,
-        source: 'calendar' as const,
-      }
-      
-      try {
-        await createExpenseAPI(expensePayload)
-        // Revalidate expenses cache
-        mutate(`expenses-${viewStartDate}-${viewEndDate}`)
-        mutate('expenses')
-        mutate('payable-summary')
-        mutate((k: unknown) => Array.isArray(k) && k[0] === 'charts')
-        mutateCalendarSummary()
-        toast({
-          title: 'Travel expense added',
-          description: `Added travel expense for $${expensePayload.amount.toFixed(2)}`,
-        })
-      } catch (error) {
-        toast({
-          title: 'Error',
-          description: 'Failed to add travel expense',
           variant: 'destructive',
         })
       }
@@ -898,7 +1309,31 @@ const handleAddEntry = async () => {
         })
       }
     }
-    // Handle other entry types (time, meeting, note) as local events
+    // Handle meeting: persist to backend
+    else if (newEntry.type === 'meeting') {
+      try {
+        await createMeeting({
+          date: eventDate,
+          startTime: newEntry.startTime || undefined,
+          endTime: newEntry.endTime || undefined,
+          contactId: newEntry.client || undefined,
+          title: newEntry.title || 'Meeting',
+          notes: newEntry.notes || undefined,
+        })
+        mutate(`meetings-${viewStartDate}-${viewEndDate}`)
+        mutate('upcoming-meetings')
+        mutateMeetings()
+        mutateCalendarSummary()
+        toast({ title: 'Meeting added', description: 'Saved to calendar.' })
+      } catch (e) {
+        toast({
+          title: 'Failed to save meeting',
+          description: e instanceof Error ? e.message : 'Please try again.',
+          variant: 'destructive',
+        })
+      }
+    }
+    // Handle other entry types (time, note) as local events
     else {
       const newEvent: CalendarEvent = {
         id: `local-${Date.now()}`,
@@ -932,6 +1367,7 @@ const handleAddEntry = async () => {
       client: '',
       amount: '',
       hours: '',
+      minutes: '',
       kilometers: '',
       kmRate: '',
       category: defaultCategoryId,
@@ -942,7 +1378,227 @@ const handleAddEntry = async () => {
       startTime: '',
       endTime: '',
       vendor: '',
+      invoiceItem: '',
     })
+  }
+
+  const resetTravelForm = () => {
+    setTravelForm({
+      fromAddress: '',
+      toAddress: '',
+      roundTrip: false,
+      stops: [],
+      distance: '',
+      rate: '',
+      taxes: '',
+      notes: '',
+    })
+  }
+
+  const handleTimeStart = async () => {
+    if (runningTimeEntryFromServer) {
+      const d = runningTimeEntryFromServer.date
+      const client = runningTimeEntryFromServer.contactId || 'Unknown'
+      toast({
+        title: 'Another timer is running',
+        description: `Stop or resume the timer for ${d} (${client}) first.`,
+        variant: 'destructive',
+      })
+      return
+    }
+    const eventDate = selectedDate ? formatDateToLocal(selectedDate) : formatDateToLocal(new Date())
+    const hourlyRate = newEntry.amount !== '' && !Number.isNaN(parseFloat(newEntry.amount)) ? parseFloat(newEntry.amount) : (calendarConfig?.defaultHourlyRate ?? 0)
+    const startedAtIso = new Date().toISOString()
+    timerStartTimeRef.current = Date.now()
+    setElapsedSeconds(0)
+    setTimerStartedAt(startedAtIso)
+    try {
+      const created = await createTimeEntry({
+        date: eventDate,
+        contactId: newEntry.client || '',
+        invoiceItem: newEntry.invoiceItem || '',
+        description: newEntry.title || newEntry.notes || '',
+        hourlyRate,
+        durationMinutes: 0,
+        amount: 0,
+        invoiceId: null,
+        timerStartedAt: startedAtIso,
+      })
+      const entry = created[0]
+      if (entry) {
+        setTimeEntryId(entry.id)
+        const serverStartedAt = entry.timerStartedAt ? new Date(entry.timerStartedAt).getTime() : Date.now()
+        if (!timerStartTimeRef.current) timerStartTimeRef.current = serverStartedAt
+      mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+      mutateTimeEntries()
+      mutateTimeEntriesAll()
+      mutate('time-entries-unbilled')
+      toast({ title: 'Timer started', description: 'Elapsed time is being recorded for this date and client.' })
+      }
+    } catch (error) {
+      timerStartTimeRef.current = null
+      setTimerStartedAt(null)
+      toast({ title: 'Error', description: 'Failed to start timer', variant: 'destructive' })
+    }
+  }
+
+  const handleTimeResume = () => {
+    if (!runningTimeEntryFromServer) return
+    const r = runningTimeEntryFromServer
+    setSelectedDate(r.date ? parseDateString(r.date) : selectedDate)
+    setNewEntry((prev) => ({
+      ...prev,
+      client: r.contactId || '',
+      invoiceItem: r.invoiceItem || '',
+      title: r.description || '',
+      amount: r.hourlyRate > 0 ? String(r.hourlyRate) : prev.amount,
+      hours: String(Math.floor(r.durationMinutes / 60)),
+      minutes: String(r.durationMinutes % 60),
+    }))
+    setTimeEntryId(r.id)
+    setTimerStartedAt(r.timerStartedAt)
+    timerStartTimeRef.current = r.timerStartedAt ? new Date(r.timerStartedAt).getTime() : null
+    setElapsedSeconds(r.timerStartedAt ? Math.floor((Date.now() - new Date(r.timerStartedAt).getTime()) / 1000) : 0)
+    mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+    mutateTimeEntries()
+    mutateTimeEntriesAll()
+  }
+
+  const handleTimeStopAndSave = async () => {
+    if (!runningTimeEntryFromServer) return
+    const r = runningTimeEntryFromServer
+    const startMs = r.timerStartedAt ? new Date(r.timerStartedAt).getTime() : 0
+    const elapsedMinutes = (Date.now() - startMs) / 60000
+    const newDuration = r.durationMinutes + elapsedMinutes
+    const hourlyRate = r.hourlyRate || 0
+    const amount = Math.round((newDuration / 60) * hourlyRate * 100) / 100
+    try {
+      await updateTimeEntry(r.id, {
+        durationMinutes: newDuration,
+        timerStartedAt: null,
+      })
+      mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+      mutateTimeEntries()
+      mutateTimeEntriesAll()
+      mutate('time-entries-unbilled')
+      mutateCalendarSummary()
+      toast({ title: 'Timer stopped and saved', description: `${Math.floor(newDuration / 60)}h ${newDuration % 60}m recorded.` })
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to stop timer', variant: 'destructive' })
+    }
+  }
+
+  const handleTimeDiscard = async () => {
+    if (!runningTimeEntryFromServer) return
+    try {
+      await updateTimeEntry(runningTimeEntryFromServer.id, { timerStartedAt: null })
+      mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+      mutateTimeEntries()
+      mutateTimeEntriesAll()
+      toast({ title: 'Timer discarded', description: 'Elapsed time was not saved.' })
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to discard timer', variant: 'destructive' })
+    }
+  }
+
+  const handleEditTimeStop = async () => {
+    if (!editingEvent || editingEvent.type !== 'time' || !editingEvent.timeEntry?.timerStartedAt) return
+    const previousDuration = editingEvent.timeEntry.durationMinutes ?? 0
+    const newDurationMinutes = previousDuration + editTimerElapsedSeconds / 60
+    const hourlyRate =
+      Number(editingEvent.hourlyRate) ||
+      Number(editingEvent.timeEntry?.hourlyRate) ||
+      (calendarConfig?.defaultHourlyRate ?? 0)
+    try {
+      await updateTimeEntry(editingEvent.id, {
+        date: editingEvent.date,
+        contactId: editingEvent.client || '',
+        invoiceItem: editingEvent.invoiceItem || '',
+        description: editingEvent.title || '',
+        hourlyRate,
+        durationMinutes: newDurationMinutes,
+        timerStartedAt: null,
+      })
+      if (editTimerIntervalRef.current) {
+        clearInterval(editTimerIntervalRef.current)
+        editTimerIntervalRef.current = null
+      }
+      editTimerStartMsRef.current = null
+      setEditTimerElapsedSeconds(0)
+      mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+      mutateTimeEntries()
+      mutateTimeEntriesAll()
+      mutate('time-entries-unbilled')
+      mutateCalendarSummary()
+      setIsEditSheetOpen(false)
+      setEditingEvent(null)
+      setIsAddingClientInEdit(false)
+      setNewClientName('')
+      const totalMins = Math.floor(newDurationMinutes)
+      toast({
+        title: 'Timer stopped and saved',
+        description: `${Math.floor(totalMins / 60)}h ${totalMins % 60}m recorded.`,
+      })
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to stop timer', variant: 'destructive' })
+    }
+  }
+
+  const handleEditTimeDiscard = async () => {
+    if (!editingEvent || editingEvent.type !== 'time' || !editingEvent.timeEntry?.timerStartedAt) return
+    try {
+      await updateTimeEntry(editingEvent.id, { timerStartedAt: null })
+      if (editTimerIntervalRef.current) {
+        clearInterval(editTimerIntervalRef.current)
+        editTimerIntervalRef.current = null
+      }
+      editTimerStartMsRef.current = null
+      setEditTimerElapsedSeconds(0)
+      mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+      mutateTimeEntries()
+      mutateTimeEntriesAll()
+      setIsEditSheetOpen(false)
+      setEditingEvent(null)
+      setIsAddingClientInEdit(false)
+      setNewClientName('')
+      toast({ title: 'Timer discarded', description: 'Elapsed time was not saved.' })
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to discard timer', variant: 'destructive' })
+    }
+  }
+
+  const handleTimeStop = async () => {
+    if (!timeEntryId) return
+    const previousDuration = timeEntriesList.find((te) => te.id === timeEntryId)?.durationMinutes ?? 0
+    const newDuration = previousDuration + elapsedSeconds / 60
+    const hourlyRate = newEntry.amount !== '' && !Number.isNaN(parseFloat(newEntry.amount)) ? parseFloat(newEntry.amount) : (calendarConfig?.defaultHourlyRate ?? 0)
+    try {
+      await updateTimeEntry(timeEntryId, {
+        durationMinutes: newDuration,
+        timerStartedAt: null,
+      })
+      const hours = Math.floor(newDuration / 60)
+      const mins = Math.round(newDuration % 60)
+      setNewEntry((prev) => ({
+        ...prev,
+        hours: String(hours),
+        minutes: String(mins),
+        amount: String(hourlyRate),
+      }))
+      setTimeEntryId(null)
+      setTimerStartedAt(null)
+      timerStartTimeRef.current = null
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current)
+        timerIntervalRef.current = null
+      }
+      mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+      mutateTimeEntries()
+      mutateTimeEntriesAll()
+      toast({ title: 'Timer stopped', description: `Recorded ${hours}h ${mins}m. Save to keep the entry.` })
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to stop timer', variant: 'destructive' })
+    }
   }
 
   const handleQuickAdd = (type: string) => {
@@ -1001,13 +1657,108 @@ const handleAddEntry = async () => {
         normalizedCategory = matchedCat.id
       }
     }
-    setEditingEvent({ ...event, category: normalizedCategory })
+    // For meetings from API, use raw title for editing (not the display "Title (start – end)")
+    let toEdit: CalendarEvent =
+      event.type === 'meeting' && event.meetingEntry
+        ? { ...event, category: normalizedCategory, title: event.meetingEntry.title }
+        : { ...event, category: normalizedCategory }
+    // For work-done, show rate in the Rate field (form uses editingEvent.amount for rate)
+    if (event.type === 'work' && event.workEntry) {
+      toEdit = { ...toEdit, amount: event.workEntry.rate }
+    }
+    setEditingEvent(toEdit)
     setIsEditSheetOpen(true)
   }
 
   const handleSaveEdit = async () => {
     if (editingEvent) {
       const eventId = editingEvent.id
+
+      // Handle time entries - call time-entries API
+      if (eventId.startsWith('time-')) {
+        const hourlyRate =
+          Number(editingEvent.hourlyRate) ||
+          Number(editingEvent.timeEntry?.hourlyRate) ||
+          (calendarConfig?.defaultHourlyRate ?? 0)
+        const timerRunning = !!editingEvent.timeEntry?.timerStartedAt
+        try {
+          if (timerRunning) {
+            // Save only metadata; do not send durationMinutes or timerStartedAt so the timer keeps running
+            await updateTimeEntry(eventId, {
+              date: editingEvent.date,
+              contactId: editingEvent.client || '',
+              invoiceItem: editingEvent.invoiceItem || '',
+              description: editingEvent.title || '',
+              hourlyRate,
+            })
+            toast({ title: 'Changes saved', description: 'Timer is still running.' })
+          } else {
+            const hoursNum = Number(editingEvent.hours) || 0
+            const minutesNum = Number(editingEvent.minutes) || 0
+            const durationMinutes = Math.round(hoursNum * 60 + minutesNum)
+            const amount = Math.round((durationMinutes / 60) * hourlyRate * 100) / 100
+            await updateTimeEntry(eventId, {
+              date: editingEvent.date,
+              contactId: editingEvent.client || '',
+              invoiceItem: editingEvent.invoiceItem || '',
+              description: editingEvent.title || '',
+              hourlyRate,
+              durationMinutes,
+              amount,
+            })
+            toast({ title: 'Time entry updated', description: 'Changes saved.' })
+          }
+          await Promise.all([
+            mutate(`time-entries-${viewStartDate}-${viewEndDate}`),
+            mutateTimeEntries(),
+            mutateTimeEntriesAll(),
+            mutate('time-entries-unbilled'),
+            mutateCalendarSummary(),
+          ])
+        } catch (error) {
+          toast({ title: 'Error', description: 'Failed to update time entry', variant: 'destructive' })
+          return
+        }
+        setIsEditSheetOpen(false)
+        setEditingEvent(null)
+        setIsAddingClientInEdit(false)
+        setNewClientName('')
+        return
+      }
+
+      // Handle travel events - call travel API
+      if (eventId.startsWith('travel-')) {
+        const distance = editTravelForm.distance !== '' && !Number.isNaN(parseFloat(editTravelForm.distance)) ? parseFloat(editTravelForm.distance) : 0
+        const defaultRate = calendarConfig?.defaultKmRate ?? 0.58
+        const rate = editTravelForm.rate !== '' && !Number.isNaN(parseFloat(editTravelForm.rate)) ? parseFloat(editTravelForm.rate) : defaultRate
+        const taxes = editTravelForm.taxes !== '' && !Number.isNaN(parseFloat(editTravelForm.taxes)) ? parseFloat(editTravelForm.taxes) : 0
+        try {
+          await updateTravel(eventId, {
+            date: editingEvent.date,
+            fromAddress: editTravelForm.fromAddress.trim(),
+            toAddress: editTravelForm.toAddress.trim(),
+            roundTrip: editTravelForm.roundTrip,
+            stops: editTravelForm.stops,
+            billTo: editTravelForm.billTo.trim(),
+            distance,
+            rate,
+            taxes: taxes || undefined,
+            notes: editTravelForm.notes.trim() || undefined,
+          })
+          mutate(`travel-${viewStartDate}-${viewEndDate}`)
+          mutateTravel()
+          mutateCalendarSummary()
+          toast({ title: 'Travel updated', description: 'Changes saved and will persist on refresh.' })
+        } catch (error) {
+          toast({ title: 'Error', description: 'Failed to update travel entry', variant: 'destructive' })
+          return
+        }
+        setIsEditSheetOpen(false)
+        setEditingEvent(null)
+        setIsAddingClientInEdit(false)
+        setNewClientName('')
+        return
+      }
       
       // Handle expense events - call API
       if (eventId.startsWith('expense-')) {
@@ -1040,6 +1791,52 @@ const handleAddEntry = async () => {
             variant: 'destructive',
           })
         }
+      } else if (eventId.startsWith('work-')) {
+        const hours = Number(editingEvent.hours) || 0
+        const rate = Number(editingEvent.amount) || 0
+        const amount = Math.round(hours * rate * 100) / 100
+        try {
+          await updateWorkDone(eventId, {
+            date: editingEvent.date,
+            contact: editingEvent.client || '',
+            description: editingEvent.title || '',
+            hours,
+            rate,
+            amount,
+          })
+          mutate(`work-done-${viewStartDate}-${viewEndDate}`)
+          await mutateWorkDone()
+          mutate('work-done-unbilled')
+          mutateCalendarSummary()
+          toast({ title: 'Work done updated', description: 'Changes saved.' })
+        } catch (error) {
+          toast({ title: 'Error', description: 'Failed to update work done', variant: 'destructive' })
+          return
+        }
+        setIsEditSheetOpen(false)
+        setEditingEvent(null)
+        setIsAddingClientInEdit(false)
+        setNewClientName('')
+        return
+      } else if (eventId.startsWith('meeting-')) {
+        try {
+          await updateMeeting(eventId, {
+            date: editingEvent.date,
+            startTime: editingEvent.startTime ?? undefined,
+            endTime: editingEvent.endTime ?? undefined,
+            contactId: editingEvent.client ?? undefined,
+            title: editingEvent.title ?? '',
+            notes: editingEvent.notes ?? undefined,
+          })
+          mutate(`meetings-${viewStartDate}-${viewEndDate}`)
+          mutate('upcoming-meetings')
+          mutateMeetings()
+          mutateCalendarSummary()
+          toast({ title: 'Meeting updated', description: 'Changes saved.' })
+        } catch (error) {
+          toast({ title: 'Error', description: 'Failed to update meeting', variant: 'destructive' })
+          return
+        }
       } else if (eventId.startsWith('local-')) {
         // Handle local events
         setLocalEvents((prev) =>
@@ -1069,8 +1866,29 @@ const handleAddEntry = async () => {
       } else if (eventId.startsWith('work-')) {
         await deleteWorkDone(eventId)
         await mutateWorkDone()
+        mutate('work-done-unbilled')
         mutateCalendarSummary()
         toast({ title: 'Entry deleted', description: 'Work done entry removed.' })
+      } else if (eventId.startsWith('travel-')) {
+        await deleteTravel(eventId)
+        mutate(`travel-${viewStartDate}-${viewEndDate}`)
+        mutateTravel()
+        mutateCalendarSummary()
+        toast({ title: 'Entry deleted', description: 'Travel entry removed.' })
+      } else if (eventId.startsWith('time-')) {
+        await deleteTimeEntry(eventId)
+        mutate(`time-entries-${viewStartDate}-${viewEndDate}`)
+        mutateTimeEntries()
+        mutate('time-entries-unbilled')
+        mutateCalendarSummary()
+        toast({ title: 'Entry deleted', description: 'Time entry removed.' })
+      } else if (eventId.startsWith('meeting-')) {
+        await deleteMeeting(eventId)
+        mutate(`meetings-${viewStartDate}-${viewEndDate}`)
+        mutate('upcoming-meetings')
+        mutateMeetings()
+        mutateCalendarSummary()
+        toast({ title: 'Entry deleted', description: 'Meeting removed.' })
       } else if (eventId.startsWith('local-')) {
         setLocalEvents((prev) => prev.filter((e) => e.id !== eventId))
         toast({ title: 'Entry deleted', description: 'Entry removed.' })
@@ -1393,7 +2211,7 @@ const handleAddEntry = async () => {
                             handleOpenExpenseForm(selectedDate || new Date())
                           } else {
                             const next = { ...newEntry, type: t.id }
-                            if (t.id === 'time' && next.amount === '') next.amount = String(calendarConfig?.defaultHourlyRate ?? 75)
+                            if (t.id === 'time' && next.amount === '') next.amount = (calendarConfig?.defaultHourlyRate != null && calendarConfig.defaultHourlyRate > 0) ? String(calendarConfig.defaultHourlyRate) : ''
                             if (t.id === 'travel' && next.kmRate === '') next.kmRate = String(calendarConfig?.defaultKmRate ?? 0.58)
                             setNewEntry(next)
                             setIsAddEventOpen(true)
@@ -1608,7 +2426,7 @@ const handleAddEntry = async () => {
                     key={t.id}
                     onClick={() => {
                       const next = { ...newEntry, type: t.id }
-                      if (t.id === 'time' && next.amount === '') next.amount = String(calendarConfig?.defaultHourlyRate ?? 75)
+                      if (t.id === 'time' && next.amount === '') next.amount = (calendarConfig?.defaultHourlyRate != null && calendarConfig.defaultHourlyRate > 0) ? String(calendarConfig.defaultHourlyRate) : ''
                       if (t.id === 'travel' && next.kmRate === '') next.kmRate = String(calendarConfig?.defaultKmRate ?? 0.58)
                       setNewEntry(next)
                       setIsAddEventOpen(true)
@@ -1623,7 +2441,22 @@ const handleAddEntry = async () => {
           </DropdownMenu>
           
           {/* Add New Entry Sheet - Momenteo Style */}
-          <Sheet open={isAddEventOpen} onOpenChange={setIsAddEventOpen}>
+          <Sheet
+            open={isAddEventOpen}
+            onOpenChange={(open) => {
+              setIsAddEventOpen(open)
+              if (!open) {
+                resetTravelForm()
+                setTimeEntryId(null)
+                setTimerStartedAt(null)
+                timerStartTimeRef.current = null
+                if (timerIntervalRef.current) {
+                  clearInterval(timerIntervalRef.current)
+                  timerIntervalRef.current = null
+                }
+              }
+            }}
+          >
             <SheetContent className="flex h-full max-h-screen w-full flex-col overflow-hidden p-0 sm:max-w-md">
               <SheetHeader className="shrink-0 border-b border-border px-4 py-4">
                 <div className="flex items-center justify-between gap-2">
@@ -1633,8 +2466,8 @@ const handleAddEntry = async () => {
                       value={entryTypes.some((t) => t.id === newEntry.type) ? newEntry.type : (entryTypes[0]?.id ?? 'work')}
                       onValueChange={(v) => {
                         const next = { ...newEntry, type: v }
-                        if (v === 'time' && newEntry.amount === '') next.amount = String(calendarConfig?.defaultHourlyRate ?? 75)
-                        if (v === 'travel' && newEntry.kmRate === '') next.kmRate = String(calendarConfig?.defaultKmRate ?? 0.58)
+                        if (v === 'time' && newEntry.amount === '') next.amount = (calendarConfig?.defaultHourlyRate != null && calendarConfig.defaultHourlyRate > 0) ? String(calendarConfig.defaultHourlyRate) : ''
+                        if (v === 'travel' && travelForm.rate === '') setTravelForm((f) => ({ ...f, rate: String(calendarConfig?.defaultKmRate ?? 0.58) }))
                         setNewEntry(next)
                       }}
                     >
@@ -1769,7 +2602,7 @@ const handleAddEntry = async () => {
                         <Label>Hourly Rate ($)</Label>
                         <Input
                           type="number"
-                          placeholder={String(calendarConfig?.defaultHourlyRate ?? 75)}
+                          placeholder={calendarConfig?.defaultHourlyRate != null && calendarConfig.defaultHourlyRate > 0 ? String(calendarConfig.defaultHourlyRate) : '0'}
                           value={newEntry.amount}
                           onChange={(e) => setNewEntry({ ...newEntry, amount: e.target.value })}
                         />
@@ -1778,11 +2611,29 @@ const handleAddEntry = async () => {
                   </>
                 )}
 
-                {/* Time Fields */}
+                {/* Time entry form (Momenteo-style) with Start/Stop timer - backend time-entries API */}
                 {newEntry.type === 'time' && (
                   <>
+                    {anotherTimerRunningBanner && runningTimeEntryFromServer && (
+                      <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 space-y-3">
+                        <p className="text-sm font-medium">
+                          A timer is already running for {runningTimeEntryFromServer.contactId || 'Unknown client'} on {runningTimeEntryFromServer.date}.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" size="sm" variant="default" onClick={handleTimeResume}>
+                            Resume
+                          </Button>
+                          <Button type="button" size="sm" variant="secondary" onClick={handleTimeStopAndSave}>
+                            Stop timer
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" onClick={handleTimeDiscard}>
+                            Discard
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-2">
-                      <Label>Contact</Label>
+                      <Label>Client</Label>
                       {isAddingClient ? (
                         <div className="flex gap-2">
                           <Input
@@ -1791,98 +2642,143 @@ const handleAddEntry = async () => {
                             onChange={(e) => setNewClientName(e.target.value)}
                             autoFocus
                           />
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={async () => {
-                              if (newClientName.trim()) {
-                                const name = newClientName.trim()
-                                if (name) {
-                                  await addContact({ name, email: '' })
-                                  setNewEntry({ ...newEntry, client: name })
-                                  setNewClientName('')
-                                  setIsAddingClient(false)
-                                }
-                              }
-                            }}
-                          >
+                          <Button type="button" size="sm" onClick={async () => {
+                            if (newClientName.trim()) {
+                              const name = newClientName.trim()
+                              await addContact({ name, email: '' })
+                              setNewEntry({ ...newEntry, client: name })
+                              setNewClientName('')
+                              setIsAddingClient(false)
+                            }
+                          }}>
                             <Check className="h-4 w-4" />
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setIsAddingClient(false)
-                              setNewClientName('')
-                            }}
-                          >
+                          <Button type="button" size="sm" variant="ghost" onClick={() => { setIsAddingClient(false); setNewClientName('') }}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
                       ) : (
                         <Select value={newEntry.client} onValueChange={(v) => {
-                          if (v === '__add_new__') {
-                            setIsAddingClient(true)
-                          } else {
-                            setNewEntry({ ...newEntry, client: v })
-                          }
+                          if (v === '__add_new__') setIsAddingClient(true)
+                          else setNewEntry({ ...newEntry, client: v })
                         }}>
                           <SelectTrigger>
                             <SelectValue placeholder="Select a contact" />
                           </SelectTrigger>
                           <SelectContent>
-                            {sortAlphabetically(contacts).map((contact) => (
-                              <SelectItem key={contact.id} value={contact.name}>
-                                {contact.name}
-                              </SelectItem>
+                            {sortAlphabetically(contacts).map((c) => (
+                              <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
                             ))}
                             <SelectItem value="__add_new__" className="text-primary">
-                              <span className="flex items-center gap-2">
-                                <Plus className="h-3 w-3" />
-                                Add new contact
-                              </span>
+                              <span className="flex items-center gap-2"><Plus className="h-3 w-3" /> Add new contact</span>
                             </SelectItem>
                           </SelectContent>
                         </Select>
                       )}
                     </div>
                     <div className="space-y-2">
-                      <Label>Description</Label>
+                      <Label>Invoice item / service</Label>
                       <Input
+                        placeholder="e.g. Consulting, Design"
+                        value={newEntry.invoiceItem || ''}
+                        onChange={(e) => setNewEntry({ ...newEntry, invoiceItem: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Hourly rate ($)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder={calendarConfig?.defaultHourlyRate != null && calendarConfig.defaultHourlyRate > 0 ? String(calendarConfig.defaultHourlyRate) : '0'}
+                        value={newEntry.amount}
+                        onChange={(e) => setNewEntry({ ...newEntry, amount: e.target.value })}
+                      />
+                    </div>
+                    <Label>Duration (required)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {effectiveTimerStartedAt
+                        ? 'Timer running — duration will be set when you stop or save. Hours and Minutes cannot be edited while the timer is running.'
+                        : 'Enter hours/minutes or use the timer.'}
+                    </p>
+                    {effectiveTimerStartedAt ? (
+                      <div className="rounded-md border bg-muted/50 p-3 space-y-2">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <span className="text-sm font-medium">Timer running</span>
+                          <span className="font-mono text-lg">
+                            {Math.floor(elapsedSeconds / 3600)}h {String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0')}m {String(elapsedSeconds % 60).padStart(2, '0')}s
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Amount: ${(
+                            ((timeEntriesForTimer.find((te) => te.id === timeEntryId)?.durationMinutes ?? 0) / 60 +
+                              elapsedSeconds / 3600) *
+                            (newEntry.amount !== '' && !Number.isNaN(parseFloat(newEntry.amount))
+                              ? parseFloat(newEntry.amount)
+                              : calendarConfig?.defaultHourlyRate ?? 0)
+                          ).toFixed(2)}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Hours</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.25"
+                            placeholder="0"
+                            value={newEntry.hours}
+                            onChange={(e) => setNewEntry({ ...newEntry, hours: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Minutes</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={59}
+                            placeholder="0"
+                            value={newEntry.minutes ?? ''}
+                            onChange={(e) => setNewEntry({ ...newEntry, minutes: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label>Details / description</Label>
+                      <Textarea
                         placeholder="What did you work on?"
-                        value={newEntry.title}
+                        rows={2}
+                        value={newEntry.title || ''}
                         onChange={(e) => setNewEntry({ ...newEntry, title: e.target.value })}
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Start Time</Label>
-                        <Input
-                          type="time"
-                          value={newEntry.startTime || ''}
-                          onChange={(e) => setNewEntry({ ...newEntry, startTime: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>End Time</Label>
-                        <Input
-                          type="time"
-                          value={newEntry.endTime || ''}
-                          onChange={(e) => setNewEntry({ ...newEntry, endTime: e.target.value })}
-                        />
-                      </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant={effectiveTimerStartedAt ? 'secondary' : 'default'}
+                        size="sm"
+                        onClick={handleTimeStart}
+                        disabled={!!effectiveTimerStartedAt}
+                      >
+                        <Clock className="h-4 w-4 mr-1" />
+                        Start timer
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleTimeStop}
+                        disabled={!effectiveTimerStartedAt}
+                      >
+                        Stop timer
+                      </Button>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Hours (calculated)</Label>
-                      <Input
-                        type="number"
-                        step="0.25"
-                        placeholder="0"
-                        value={newEntry.hours}
-                        onChange={(e) => setNewEntry({ ...newEntry, hours: e.target.value })}
-                      />
-                    </div>
+                    {effectiveTimerStartedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Click Save to store the current time (timer will stop). Or click Stop timer to fill Hours/Minutes and edit before saving.
+                      </p>
+                    )}
                   </>
                 )}
 
@@ -1954,68 +2850,180 @@ const handleAddEntry = async () => {
                   </>
                 )}
 
-                  {/* Travel Fields */}
+                  {/* Travel entry form (Momenteo-style) - saved via backend API only */}
                 {newEntry.type === 'travel' && (
                   <>
                     <div className="space-y-2">
-                      <Label>Description</Label>
+                      <Label>From address</Label>
                       <Input
-                        placeholder="Where did you go?"
-                        value={newEntry.title}
-                        onChange={(e) => setNewEntry({ ...newEntry, title: e.target.value })}
+                        placeholder="Start address"
+                        value={travelForm.fromAddress}
+                        onChange={(e) => setTravelForm((f) => ({ ...f, fromAddress: e.target.value }))}
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>To address</Label>
+                      <Input
+                        placeholder="Destination address"
+                        value={travelForm.toAddress}
+                        onChange={(e) => setTravelForm((f) => ({ ...f, toAddress: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="travel-round-trip">Round trip</Label>
+                      <Switch
+                        id="travel-round-trip"
+                        checked={travelForm.roundTrip}
+                        onCheckedChange={(checked) => setTravelForm((f) => ({ ...f, roundTrip: checked }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Add step (stops)</Label>
                       <div className="space-y-2">
-                        <Label>Kilometers</Label>
-                        <Input
-                          type="number"
-                          placeholder="0"
-                          value={newEntry.kilometers}
-                          onChange={(e) => setNewEntry({ ...newEntry, kilometers: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Rate per km ($)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          placeholder={String(calendarConfig?.defaultKmRate ?? 0.58)}
-                          value={newEntry.kmRate}
-                          onChange={(e) => setNewEntry({ ...newEntry, kmRate: e.target.value })}
-                        />
+                        {travelForm.stops.map((stop, idx) => (
+                          <div key={idx} className="flex gap-2">
+                            <Input
+                              placeholder={`Stop ${idx + 1}`}
+                              value={stop}
+                              onChange={(e) => {
+                                const next = [...travelForm.stops]
+                                next[idx] = e.target.value
+                                setTravelForm((f) => ({ ...f, stops: next }))
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => setTravelForm((f) => ({ ...f, stops: f.stops.filter((_, i) => i !== idx) }))}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setTravelForm((f) => ({ ...f, stops: [...f.stops, ''] }))}
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Add step
+                        </Button>
                       </div>
                     </div>
-                      <div className="space-y-2">
-                        <Label>Contact</Label>
-                        <Select value={newEntry.client} onValueChange={(v) => {
-                          if (v === '__add_new__') {
-                            setIsAddingClient(true)
-                          } else {
-                            setNewEntry({ ...newEntry, client: v })
-                          }
-                        }}>
+                    <div className="space-y-2">
+                      <Label>Bill to (contact/client)</Label>
+                      {isAddingClient ? (
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Enter contact name"
+                            value={newClientName}
+                            onChange={(e) => setNewClientName(e.target.value)}
+                            autoFocus
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={async () => {
+                              if (newClientName.trim()) {
+                                const name = newClientName.trim()
+                                await addContact({ name, email: '' })
+                                setNewEntry({ ...newEntry, client: name })
+                                setNewClientName('')
+                                setIsAddingClient(false)
+                              }
+                            }}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" onClick={() => { setIsAddingClient(false); setNewClientName('') }}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Select
+                          value={newEntry.client && newEntry.client !== '__none__' ? newEntry.client : '__none__'}
+                          onValueChange={(v) => {
+                            if (v === '__add_new__') setIsAddingClient(true)
+                            else setNewEntry({ ...newEntry, client: v === '__none__' ? '' : v })
+                          }}
+                        >
                           <SelectTrigger>
-                            <SelectValue placeholder="Bill to client?" />
+                            <SelectValue placeholder="Select contact or leave empty" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="expense">Track as expense</SelectItem>
+                            <SelectItem value="__none__">Track as expense (no client)</SelectItem>
                             {sortAlphabetically(contacts).map((contact) => (
-                              <SelectItem key={contact.id} value={contact.name}>
-                                {contact.name}
-                              </SelectItem>
+                              <SelectItem key={contact.id} value={contact.name}>{contact.name}</SelectItem>
                             ))}
                             <SelectItem value="__add_new__" className="text-primary">
-                              <span className="flex items-center gap-2">
-                                <Plus className="h-3 w-3" />
-                                Add new contact
-                              </span>
+                              <span className="flex items-center gap-2"><Plus className="h-3 w-3" /> Add new contact</span>
                             </SelectItem>
                           </SelectContent>
                         </Select>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Distance (km)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          placeholder="0"
+                          value={travelForm.distance}
+                          onChange={(e) => setTravelForm((f) => ({ ...f, distance: e.target.value }))}
+                        />
                       </div>
-                    </>
-                  )}
+                      <div className="space-y-2">
+                        <Label>Rate ($/km)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          placeholder={String(calendarConfig?.defaultKmRate ?? 0.58)}
+                          value={travelForm.rate}
+                          onChange={(e) => setTravelForm((f) => ({ ...f, rate: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Taxes ($, optional)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        placeholder="0"
+                        value={travelForm.taxes}
+                        onChange={(e) => setTravelForm((f) => ({ ...f, taxes: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Notes / Purpose</Label>
+                      <Textarea
+                        placeholder="Purpose or notes"
+                        rows={2}
+                        value={travelForm.notes}
+                        onChange={(e) => setTravelForm((f) => ({ ...f, notes: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2 rounded-md border bg-muted/50 p-3">
+                      <Label className="text-sm font-medium">Total</Label>
+                      <p className="text-lg font-semibold">
+                        $
+                        {(
+                          (() => {
+                            const d = travelForm.distance !== '' && !Number.isNaN(parseFloat(travelForm.distance)) ? parseFloat(travelForm.distance) : 0
+                            const r = travelForm.rate !== '' && !Number.isNaN(parseFloat(travelForm.rate)) ? parseFloat(travelForm.rate) : (calendarConfig?.defaultKmRate ?? 0.58)
+                            const t = travelForm.taxes !== '' && !Number.isNaN(parseFloat(travelForm.taxes)) ? parseFloat(travelForm.taxes) : 0
+                            return d * r * (travelForm.roundTrip ? 2 : 1) + t
+                          })()
+                        ).toFixed(2)}
+                      </p>
+                    </div>
+                  </>
+                )}
 
                   {/* Meeting Fields */}
                 {newEntry.type === 'meeting' && (
@@ -2027,6 +3035,24 @@ const handleAddEntry = async () => {
                         value={newEntry.title}
                         onChange={(e) => setNewEntry({ ...newEntry, title: e.target.value })}
                       />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-2">
+                        <Label>Start time</Label>
+                        <Input
+                          type="time"
+                          value={newEntry.startTime}
+                          onChange={(e) => setNewEntry({ ...newEntry, startTime: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>End time</Label>
+                        <Input
+                          type="time"
+                          value={newEntry.endTime}
+                          onChange={(e) => setNewEntry({ ...newEntry, endTime: e.target.value })}
+                        />
+                      </div>
                     </div>
                     <div className="space-y-2">
                         <Label>Contact</Label>
@@ -2556,10 +3582,9 @@ const handleAddEntry = async () => {
                 <TooltipTrigger asChild>
                   <div>
                     <CalendarClock className="h-5 w-5" />
-                    {sortedUpcomingEvents.filter((e) => e.urgency === 'overdue' || e.urgency === 'due_soon').length >
-                      0 && (
+                    {sortedUpcomingEvents.length > 0 && (
                       <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] text-destructive-foreground">
-                        {sortedUpcomingEvents.filter((e) => e.urgency === 'overdue' || e.urgency === 'due_soon').length}
+                        {sortedUpcomingEvents.length}
                       </span>
                     )}
                   </div>
@@ -2647,6 +3672,7 @@ const handleAddEntry = async () => {
                       const Icon = config?.icon || FileCheck
                       const isOverdue = event.urgency === 'overdue'
                       const isDueSoon = event.urgency === 'due_soon'
+                      const isMeeting = event.type === 'meeting'
 
                       return (
                         <div
@@ -2672,23 +3698,31 @@ const handleAddEntry = async () => {
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-xs font-medium">{event.title}</p>
-                            <span className="text-[10px] text-muted-foreground">
-                              {parseDateString(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </span>
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[10px] text-muted-foreground">
+                                {parseDateString(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                {isMeeting && event.timeLabel ? ` · ${event.timeLabel}` : ''}
+                              </span>
+                              {isMeeting && config?.label && (
+                                <span className="text-[10px] text-muted-foreground">{config.label}</span>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs font-semibold">${event.amount?.toLocaleString()}</p>
-                            {isOverdue && (
-                              <Badge variant="destructive" className="h-4 px-1 text-[8px]">
-                                Overdue
-                              </Badge>
-                            )}
-                            {isDueSoon && !isOverdue && (
-                              <Badge className="h-4 bg-orange-500 px-1 text-[8px] hover:bg-orange-600">
-                                {event.daysUntil}d left
-                              </Badge>
-                            )}
-                          </div>
+                          {!isMeeting && (
+                            <div className="text-right">
+                              <p className="text-xs font-semibold">${event.amount?.toLocaleString()}</p>
+                              {isOverdue && (
+                                <Badge variant="destructive" className="h-4 px-1 text-[8px]">
+                                  Overdue
+                                </Badge>
+                              )}
+                              {isDueSoon && !isOverdue && (
+                                <Badge className="h-4 bg-orange-500 px-1 text-[8px] hover:bg-orange-600">
+                                  {event.daysUntil}d left
+                                </Badge>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -2778,7 +3812,7 @@ const handleAddEntry = async () => {
                     <CalendarClock className="h-4 w-4 text-muted-foreground" />
                     Upcoming
                   </CardTitle>
-                  <CardDescription className="text-[10px]">Invoices, bills, and expected payments</CardDescription>
+                  <CardDescription className="text-[10px]">Invoices, meetings, and expected payments</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-1.5 p-3 pt-0">
                   {sortedUpcomingEvents.slice(0, 5).map((event) => {
@@ -2786,6 +3820,7 @@ const handleAddEntry = async () => {
                     const Icon = config?.icon || FileCheck
                     const isOverdue = event.urgency === 'overdue'
                     const isDueSoon = event.urgency === 'due_soon'
+                    const isMeeting = event.type === 'meeting'
 
                     return (
                       <div
@@ -2811,30 +3846,36 @@ const handleAddEntry = async () => {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-xs font-medium">{event.title}</p>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex flex-col gap-0.5">
                             <span className="text-[10px] text-muted-foreground">
                               {parseDateString(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              {isMeeting && event.timeLabel ? ` · ${event.timeLabel}` : ''}
                             </span>
+                            {isMeeting && config?.label && (
+                              <span className="text-[10px] text-muted-foreground">{config.label}</span>
+                            )}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs font-semibold">${event.amount?.toLocaleString()}</p>
-                          {isOverdue && (
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Badge variant="destructive" className="h-4 px-1 text-[8px]">
-                                  Overdue
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent>Past due date</TooltipContent>
-                            </Tooltip>
-                          )}
-                          {isDueSoon && !isOverdue && (
-                            <Badge className="h-4 bg-orange-500 px-1 text-[8px] hover:bg-orange-600">
-                              {event.daysUntil}d left
-                            </Badge>
-                          )}
-                        </div>
+                        {!isMeeting && (
+                          <div className="text-right">
+                            <p className="text-xs font-semibold">${event.amount?.toLocaleString()}</p>
+                            {isOverdue && (
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Badge variant="destructive" className="h-4 px-1 text-[8px]">
+                                    Overdue
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>Past due date</TooltipContent>
+                              </Tooltip>
+                            )}
+                            {isDueSoon && !isOverdue && (
+                              <Badge className="h-4 bg-orange-500 px-1 text-[8px] hover:bg-orange-600">
+                                {event.daysUntil}d left
+                              </Badge>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -3110,7 +4151,7 @@ const handleAddEntry = async () => {
                         <Input
                           type="number"
                           step="0.01"
-                          value={editingEvent.amount || ''}
+                          value={editingEvent.workEntry?.rate ?? editingEvent.amount ?? ''}
                           onChange={(e) =>
                             setEditingEvent({
                               ...editingEvent,
@@ -3401,48 +4442,337 @@ const handleAddEntry = async () => {
                   </>
                 )}
 
-                {/* ===== TRAVEL FIELDS ===== */}
-                {editingEvent.type === 'travel' && (
+                {/* ===== TIME FIELDS (same as Create; show live timer when this entry has timerStartedAt) ===== */}
+                {editingEvent.type === 'time' && editingEvent.timeEntry && (
                   <>
+                    {editingEvent.timeEntry.timerStartedAt && (
+                      <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 space-y-3">
+                        <p className="text-sm font-medium">Timer running</p>
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <span className="font-mono text-lg">
+                            {Math.floor(editTimerElapsedSeconds / 3600)}h {String(Math.floor((editTimerElapsedSeconds % 3600) / 60)).padStart(2, '0')}m {String(editTimerElapsedSeconds % 60).padStart(2, '0')}s
+                          </span>
+                          <span className="text-sm font-medium">
+                            Amount: ${(
+                              ((editingEvent.timeEntry.durationMinutes ?? 0) / 60 + editTimerElapsedSeconds / 3600) *
+                              (editingEvent.timeEntry?.hourlyRate ?? editingEvent.hourlyRate ?? calendarConfig?.defaultHourlyRate ?? 0)
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Save updates client, rate, notes, etc. without stopping the timer. Stop timer applies elapsed time and saves. Discard cancels the timer without adding time.
+                        </p>
+                        <div className="flex gap-2">
+                          <Button type="button" size="sm" variant="default" onClick={handleEditTimeStop}>
+                            Stop timer
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" onClick={handleEditTimeDiscard}>
+                            Discard
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label className="text-xs">Client</Label>
+                      {isAddingClientInEdit ? (
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Enter contact name"
+                            value={newClientName}
+                            onChange={(e) => setNewClientName(e.target.value)}
+                            className="h-10 sm:h-9 flex-1"
+                            autoFocus
+                          />
+                          <Button type="button" size="sm" className="h-10 sm:h-9" onClick={async () => {
+                            if (newClientName.trim()) {
+                              const name = newClientName.trim()
+                              await addContact({ name, email: '' })
+                              setEditingEvent({ ...editingEvent, client: name })
+                              setNewClientName('')
+                              setIsAddingClientInEdit(false)
+                            }
+                          }}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" className="h-10 sm:h-9" onClick={() => { setIsAddingClientInEdit(false); setNewClientName('') }}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Select
+                          value={editingEvent.client || 'none'}
+                          onValueChange={(v) => setEditingEvent({ ...editingEvent, client: v === 'none' ? undefined : v })}
+                        >
+                          <SelectTrigger className="h-10 sm:h-9">
+                            <SelectValue placeholder="Select contact" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No client</SelectItem>
+                            {sortAlphabetically(contacts).map((c) => (
+                              <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Invoice item / service</Label>
+                      <Input
+                        value={editingEvent.invoiceItem ?? ''}
+                        onChange={(e) => setEditingEvent({ ...editingEvent, invoiceItem: e.target.value })}
+                        className="h-10 sm:h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Hourly rate ($)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={editingEvent.timeEntry?.hourlyRate ?? editingEvent.hourlyRate ?? ''}
+                        onChange={(e) => setEditingEvent({ ...editingEvent, hourlyRate: e.target.value ? parseFloat(e.target.value) : undefined })}
+                        className="h-10 sm:h-9"
+                      />
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <Label className="text-xs">Kilometers</Label>
+                        <Label className="text-xs">Hours</Label>
                         <Input
                           type="number"
-                          value={editingEvent.kilometers || ''}
-                          onChange={(e) =>
-                            setEditingEvent({
-                              ...editingEvent,
-                              kilometers: e.target.value ? parseFloat(e.target.value) : undefined,
-                            })
-                          }
+                          min={0}
+                          step="0.25"
+                          value={editingEvent.hours ?? ''}
+                          onChange={(e) => setEditingEvent({ ...editingEvent, hours: e.target.value ? parseFloat(e.target.value) : undefined })}
                           className="h-10 sm:h-9"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-xs">Amount ($)</Label>
+                        <Label className="text-xs">Minutes</Label>
                         <Input
                           type="number"
-                          step="0.01"
-                          value={editingEvent.amount || ''}
-                          onChange={(e) =>
-                            setEditingEvent({
-                              ...editingEvent,
-                              amount: e.target.value ? parseFloat(e.target.value) : undefined,
-                            })
-                          }
+                          min={0}
+                          max={59}
+                          value={editingEvent.minutes ?? ''}
+                          onChange={(e) => setEditingEvent({ ...editingEvent, minutes: e.target.value ? parseInt(e.target.value, 10) : undefined })}
                           className="h-10 sm:h-9"
                         />
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs">Notes</Label>
+                      <Label className="text-xs">Details / description</Label>
                       <Textarea
-                        placeholder="Trip details, destination, purpose..."
                         rows={2}
-                        value={editingEvent.notes || ''}
-                        onChange={(e) => setEditingEvent({ ...editingEvent, notes: e.target.value || undefined })}
+                        value={editingEvent.title ?? ''}
+                        onChange={(e) => setEditingEvent({ ...editingEvent, title: e.target.value })}
                       />
+                    </div>
+                    {!editingEvent.timeEntry.timerStartedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Start/Stop timer is available when adding a new Time entry from the Add sheet.
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {/* ===== TRAVEL FIELDS (full form: same as Create) ===== */}
+                {editingEvent.type === 'travel' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label className="text-xs">From address</Label>
+                      <Input
+                        placeholder="Start address"
+                        value={editTravelForm.fromAddress}
+                        onChange={(e) => setEditTravelForm((f) => ({ ...f, fromAddress: e.target.value }))}
+                        className="h-10 sm:h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">To address</Label>
+                      <Input
+                        placeholder="Destination address"
+                        value={editTravelForm.toAddress}
+                        onChange={(e) => setEditTravelForm((f) => ({ ...f, toAddress: e.target.value }))}
+                        className="h-10 sm:h-9"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs" htmlFor="edit-travel-round-trip">Round trip</Label>
+                      <Switch
+                        id="edit-travel-round-trip"
+                        checked={editTravelForm.roundTrip}
+                        onCheckedChange={(checked) => setEditTravelForm((f) => ({ ...f, roundTrip: checked }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Stops</Label>
+                      <div className="space-y-2">
+                        {editTravelForm.stops.map((stop, idx) => (
+                          <div key={idx} className="flex gap-2">
+                            <Input
+                              placeholder={`Stop ${idx + 1}`}
+                              value={stop}
+                              onChange={(e) => {
+                                const next = [...editTravelForm.stops]
+                                next[idx] = e.target.value
+                                setEditTravelForm((f) => ({ ...f, stops: next }))
+                              }}
+                              className="h-10 sm:h-9"
+                            />
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-10 w-10 sm:h-9 sm:w-9 shrink-0"
+                              onClick={() => setEditTravelForm((f) => ({ ...f, stops: f.stops.filter((_, i) => i !== idx) }))}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setEditTravelForm((f) => ({ ...f, stops: [...f.stops, ''] }))}
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Add stop
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Bill to (contact/client)</Label>
+                      {isAddingClientInEdit ? (
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Enter contact name"
+                            value={newClientName}
+                            onChange={(e) => setNewClientName(e.target.value)}
+                            className="h-10 sm:h-9 flex-1"
+                            autoFocus
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-10 sm:h-9"
+                            onClick={async () => {
+                              if (newClientName.trim()) {
+                                const name = newClientName.trim()
+                                await addContact({ name, email: '' })
+                                setEditTravelForm((f) => ({ ...f, billTo: name }))
+                                setNewClientName('')
+                                setIsAddingClientInEdit(false)
+                              }
+                            }}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" className="h-10 sm:h-9" onClick={() => { setIsAddingClientInEdit(false); setNewClientName('') }}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Select
+                          value={editTravelForm.billTo && editTravelForm.billTo !== '__none__' ? editTravelForm.billTo : '__none__'}
+                          onValueChange={(v) => {
+                            if (v === '__add_new__') setIsAddingClientInEdit(true)
+                            else setEditTravelForm((f) => ({ ...f, billTo: v === '__none__' ? '' : v }))
+                          }}
+                        >
+                          <SelectTrigger className="h-10 sm:h-9">
+                            <SelectValue placeholder="Select contact or leave empty" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Track as expense (no client)</SelectItem>
+                            {sortAlphabetically(contacts).map((contact) => (
+                              <SelectItem key={contact.id} value={contact.name}>{contact.name}</SelectItem>
+                            ))}
+                            <SelectItem value="__add_new__" className="text-primary">
+                              <span className="flex items-center gap-2"><Plus className="h-3 w-3" /> Add new contact</span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs">Distance (km)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={editTravelForm.distance}
+                          onChange={(e) => setEditTravelForm((f) => ({ ...f, distance: e.target.value }))}
+                          className="h-10 sm:h-9"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs">Rate ($/km)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={editTravelForm.rate}
+                          onChange={(e) => setEditTravelForm((f) => ({ ...f, rate: e.target.value }))}
+                          className="h-10 sm:h-9"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Taxes ($, optional)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={editTravelForm.taxes}
+                        onChange={(e) => setEditTravelForm((f) => ({ ...f, taxes: e.target.value }))}
+                        className="h-10 sm:h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Notes / Purpose</Label>
+                      <Textarea
+                        placeholder="Purpose or notes"
+                        rows={2}
+                        value={editTravelForm.notes}
+                        onChange={(e) => setEditTravelForm((f) => ({ ...f, notes: e.target.value }))}
+                      />
+                    </div>
+                    <div className="rounded-md border bg-muted/50 p-3 space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span>Subtotal</span>
+                        <span>
+                          $
+                          {(
+                            (() => {
+                              const d = editTravelForm.distance !== '' && !Number.isNaN(parseFloat(editTravelForm.distance)) ? parseFloat(editTravelForm.distance) : 0
+                              const r = editTravelForm.rate !== '' && !Number.isNaN(parseFloat(editTravelForm.rate)) ? parseFloat(editTravelForm.rate) : (calendarConfig?.defaultKmRate ?? 0.58)
+                              return d * r * (editTravelForm.roundTrip ? 2 : 1)
+                            })()
+                          ).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span>Tax</span>
+                        <span>
+                          $
+                          {(editTravelForm.taxes !== '' && !Number.isNaN(parseFloat(editTravelForm.taxes)) ? parseFloat(editTravelForm.taxes) : 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between font-semibold pt-1 border-t border-border">
+                        <span>Total</span>
+                        <span>
+                          $
+                          {(
+                            (() => {
+                              const d = editTravelForm.distance !== '' && !Number.isNaN(parseFloat(editTravelForm.distance)) ? parseFloat(editTravelForm.distance) : 0
+                              const r = editTravelForm.rate !== '' && !Number.isNaN(parseFloat(editTravelForm.rate)) ? parseFloat(editTravelForm.rate) : (calendarConfig?.defaultKmRate ?? 0.58)
+                              const t = editTravelForm.taxes !== '' && !Number.isNaN(parseFloat(editTravelForm.taxes)) ? parseFloat(editTravelForm.taxes) : 0
+                              return d * r * (editTravelForm.roundTrip ? 2 : 1) + t
+                            })()
+                          ).toFixed(2)}
+                        </span>
+                      </div>
                     </div>
                   </>
                 )}
@@ -3450,6 +4780,35 @@ const handleAddEntry = async () => {
                 {/* ===== MEETING FIELDS ===== */}
                 {editingEvent.type === 'meeting' && (
                   <>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Title</Label>
+                      <Input
+                        placeholder="Meeting title"
+                        value={editingEvent.meetingEntry?.title ?? editingEvent.title ?? ''}
+                        onChange={(e) => setEditingEvent({ ...editingEvent, title: e.target.value })}
+                        className="h-10 sm:h-9"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-2">
+                        <Label className="text-xs">Start time</Label>
+                        <Input
+                          type="time"
+                          value={editingEvent.startTime ?? ''}
+                          onChange={(e) => setEditingEvent({ ...editingEvent, startTime: e.target.value || undefined })}
+                          className="h-10 sm:h-9"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs">End time</Label>
+                        <Input
+                          type="time"
+                          value={editingEvent.endTime ?? ''}
+                          onChange={(e) => setEditingEvent({ ...editingEvent, endTime: e.target.value || undefined })}
+                          className="h-10 sm:h-9"
+                        />
+                      </div>
+                    </div>
                     <div className="space-y-2">
                       <Label className="text-xs">Contact</Label>
                       {isAddingClientInEdit ? (
@@ -3565,24 +4924,40 @@ const handleAddEntry = async () => {
             </div>
           )}
 
-          {/* Fixed Footer Actions - Always visible at bottom */}
+          {/* Fixed Footer Actions - Always visible at bottom; wraps on small widths */}
           {editingEvent && (
-            <div className="sticky bottom-0 shrink-0 border-t border-border bg-background px-4 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] sm:px-6">
-              <div className="flex gap-3">
+            <div className="sticky bottom-0 shrink-0 border-t border-border bg-background px-4 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] sm:px-6 overflow-x-hidden">
+              <div className="flex flex-wrap gap-3">
                 <Button
                   variant="outline"
                   size="lg"
-                  className="flex-1 bg-transparent"
+                  className="flex-1 min-w-[8rem] bg-transparent"
                   onClick={() => setIsEditSheetOpen(false)}
                 >
                   Cancel
                 </Button>
-                <Button size="lg" className="flex-1" onClick={handleSaveEdit}>
-                  <Save className="mr-2 h-4 w-4" />
-                  Save Changes
-                </Button>
+                {editingEvent.type === 'time' && editingEvent.timeEntry?.timerStartedAt ? (
+                  <>
+                    <Button size="lg" className="flex-1 min-w-[8rem]" onClick={handleSaveEdit}>
+                      <Save className="mr-2 h-4 w-4" />
+                      Save
+                    </Button>
+                    <Button size="lg" variant="secondary" className="flex-1 min-w-[8rem]" onClick={handleEditTimeStop}>
+                      <Clock className="mr-2 h-4 w-4" />
+                      Stop timer
+                    </Button>
+                    <Button size="lg" variant="outline" className="flex-1 min-w-[8rem]" onClick={handleEditTimeDiscard}>
+                      Discard
+                    </Button>
+                  </>
+                ) : (
+                  <Button size="lg" className="flex-1 min-w-[8rem]" onClick={handleSaveEdit}>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save Changes
+                  </Button>
+                )}
               </div>
-              {(editingEvent.id.startsWith('expense-') || editingEvent.id.startsWith('work-') || editingEvent.id.startsWith('local-')) && (
+              {(editingEvent.id.startsWith('expense-') || editingEvent.id.startsWith('work-') || editingEvent.id.startsWith('travel-') || editingEvent.id.startsWith('time-') || editingEvent.id.startsWith('meeting-') || editingEvent.id.startsWith('local-')) && !editingEvent.timeEntry?.timerStartedAt && (
                 <Button
                   variant="ghost"
                   size="sm"
