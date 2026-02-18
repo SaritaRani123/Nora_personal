@@ -1,5 +1,17 @@
 [
   {
+    "id": "time-1771384597515",
+    "date": "2026-02-12",
+    "contactId": "",
+    "invoiceItem": "",
+    "description": "",
+    "hourlyRate": 75,
+    "durationMinutes": 0,
+    "amount": 0,
+    "invoiceId": null,
+    "timerStartedAt": "2026-02-18T03:16:37.450Z"
+  },
+  {
     "id": "time-1771379026015",
     "date": "2026-02-13",
     "contactId": "John Smith",
