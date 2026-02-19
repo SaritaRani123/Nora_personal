@@ -55,14 +55,18 @@ export function DateRangeFilter({
       <PopoverContent
         className="w-80"
         align="end"
+        onCloseAutoFocus={(e) => {
+          e.preventDefault()
+        }}
         onInteractOutside={(e) => {
-          // Keep popover open when native date picker is open (it renders outside, triggers "interact outside")
           const active = document.activeElement as HTMLInputElement | null
-          if (active?.type === 'date') e.preventDefault()
+          const target = e.target as HTMLInputElement | null
+          if (active?.type === 'date' || (target?.tagName === 'INPUT' && target?.type === 'date')) e.preventDefault()
         }}
         onPointerDownOutside={(e) => {
           const active = document.activeElement as HTMLInputElement | null
-          if (active?.type === 'date') e.preventDefault()
+          const target = e.target as HTMLInputElement | null
+          if (active?.type === 'date' || (target?.tagName === 'INPUT' && target?.type === 'date')) e.preventDefault()
         }}
         onFocusOutside={(e) => {
           // Keep open when focus moves to native date picker (user selecting second date)

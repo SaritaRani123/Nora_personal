@@ -4,6 +4,7 @@ import { StatsCards } from '@/components/stats-cards'
 import { PayableOwingSummary } from '@/components/payable-owing-summary'
 import { IncomeExpenseChart } from '@/components/income-expense-chart'
 import { CategoryChart } from '@/components/category-chart'
+import { Card } from '@/components/ui/card'
 
 export default function DashboardPage() {
   return (
@@ -21,7 +22,9 @@ export default function DashboardPage() {
         <div className="lg:col-span-2">
           <IncomeExpenseChart />
         </div>
-        <CategoryChart />
+        <Card className="bg-card border-border">
+          <CategoryChart showTooltip />
+        </Card>
       </div>
     </div>
   )

@@ -1,8 +1,6 @@
-import { format } from 'date-fns'
-
 /**
  * Minimal expense shape used for filtering (same as Expenses page logic).
- * Used so Dashboard and Expenses page share the exact same filter + total calculation.
+ * Used by both Dashboard and Expenses page so "Total Expenses" always uses the same calculation.
  */
 export interface ExpenseForFilter {
   id: string
@@ -29,9 +27,36 @@ export const DEFAULT_EXPENSE_FILTERS: ExpenseFilters = {
   dateRange: { from: undefined, to: undefined },
 }
 
+/** Parse YYYY-MM-DD as local date (not UTC). Do not use new Date("YYYY-MM-DD") which parses as UTC. */
+function parseLocalDate(dateStr: string): { year: number; month: number; day: number } {
+  const [year, month, day] = dateStr.slice(0, 10).split('-').map(Number)
+  return { year, month: month - 1, day }
+}
+
+/** Start of day in local time (00:00:00.000). */
+function localStartOfDay(dateStr: string): Date {
+  const { year, month, day } = parseLocalDate(dateStr)
+  return new Date(year, month, day, 0, 0, 0, 0)
+}
+
+/** End of day in local time (23:59:59.999). */
+function localEndOfDay(dateStr: string): Date {
+  const { year, month, day } = parseLocalDate(dateStr)
+  return new Date(year, month, day, 23, 59, 59, 999)
+}
+
+/** Get YYYY-MM-DD from a Date using its UTC date (so calendar date is preserved when caller used new Date("YYYY-MM-DD")). */
+function toYYYYMMDD(d: Date): string {
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 /**
  * Filter expenses using the same logic as the Expenses page.
- * Used by both Dashboard and Expenses page so "Total Expenses" always uses the same calculation.
+ * Date range is inclusive: from = start of day (00:00:00.000), to = end of day (23:59:59.999).
+ * Compares real Date objects; parses YYYY-MM-DD as local (not UTC).
  */
 export function filterExpenses<T extends ExpenseForFilter>(
   expenses: T[],
@@ -45,15 +70,21 @@ export function filterExpenses<T extends ExpenseForFilter>(
 
     let matchesDateRange = true
     if (dateRange.from || dateRange.to) {
-      const expenseDateStr = e.date
-      const fromStr = dateRange.from ? format(dateRange.from, 'yyyy-MM-dd') : null
-      const toStr = dateRange.to ? format(dateRange.to, 'yyyy-MM-dd') : null
-      if (fromStr && toStr) {
-        matchesDateRange = expenseDateStr >= fromStr && expenseDateStr <= toStr
-      } else if (fromStr) {
-        matchesDateRange = expenseDateStr >= fromStr
-      } else if (toStr) {
-        matchesDateRange = expenseDateStr <= toStr
+      const expenseDate = localStartOfDay(e.date.slice(0, 10))
+      if (dateRange.from && dateRange.to) {
+        const fromStr = toYYYYMMDD(dateRange.from)
+        const toStr = toYYYYMMDD(dateRange.to)
+        const fromStart = localStartOfDay(fromStr)
+        const toEnd = localEndOfDay(toStr)
+        matchesDateRange = expenseDate >= fromStart && expenseDate <= toEnd
+      } else if (dateRange.from) {
+        const fromStr = toYYYYMMDD(dateRange.from)
+        const fromStart = localStartOfDay(fromStr)
+        matchesDateRange = expenseDate >= fromStart
+      } else {
+        const toStr = toYYYYMMDD(dateRange.to!)
+        const toEnd = localEndOfDay(toStr)
+        matchesDateRange = expenseDate <= toEnd
       }
     }
 

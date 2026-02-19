@@ -2043,31 +2043,33 @@ const handleAddEntry = async () => {
       <div className="flex h-[calc(100vh-4rem)] flex-col">
         {/* Compact Header with Inline Stats */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2 md:gap-4 md:px-4 md:py-3">
-          {/* Left: Navigation */}
-          <div className="flex items-center gap-1 md:gap-2">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigateMonth('prev')}>
+          {/* Left: Navigation - fixed-width month so header does not shift (e.g. August vs September) */}
+          <div className="flex shrink-0 items-center gap-1 whitespace-nowrap md:gap-2">
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => navigateMonth('prev')}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
             {viewMode === 'month' ? (
               <div className="flex shrink-0 items-center gap-1">
-                <Select
-                  value={month.toString()}
-                  onValueChange={(value) => setCurrentDate(new Date(year, parseInt(value), 1))}
-                >
-                  <SelectTrigger className="h-8 w-auto min-w-[90px] border-0 bg-transparent text-sm font-semibold md:min-w-[110px] md:text-lg">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MONTHS.map((m, idx) => (
-                      <SelectItem key={m} value={idx.toString()}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="w-[9.5rem] min-w-[9.5rem] shrink-0">
+                  <Select
+                    value={month.toString()}
+                    onValueChange={(value) => setCurrentDate(new Date(year, parseInt(value), 1))}
+                  >
+                    <SelectTrigger className="h-8 w-full border-0 bg-transparent text-sm font-semibold md:text-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTHS.map((m, idx) => (
+                        <SelectItem key={m} value={idx.toString()}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Select
                   value={year.toString()}
                   onValueChange={(value) => setCurrentDate(new Date(parseInt(value), month, 1))}
                 >
-                  <SelectTrigger className="h-8 w-auto min-w-[60px] border-0 bg-transparent text-sm font-semibold md:min-w-[70px] md:text-lg">
+                  <SelectTrigger className="h-8 w-auto min-w-[60px] shrink-0 border-0 bg-transparent text-sm font-semibold md:min-w-[70px] md:text-lg">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -2078,16 +2080,18 @@ const handleAddEntry = async () => {
                 </Select>
               </div>
             ) : (
-              <h1 className="min-w-[100px] text-center text-sm font-semibold text-foreground md:min-w-[140px] md:text-lg">
-                {viewMode === 'week'
-                  ? `Week of ${weekDays[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-                  : 'Upcoming Events'}
-              </h1>
+              <div className="w-[9.5rem] min-w-[9.5rem] shrink-0 text-center">
+                <h1 className="text-sm font-semibold text-foreground md:text-lg">
+                  {viewMode === 'week'
+                    ? `Week of ${weekDays[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                    : 'Upcoming Events'}
+                </h1>
+              </div>
             )}
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigateMonth('next')}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => navigateMonth('next')}>
               <ChevronRight className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="sm" className="ml-1 h-8 bg-transparent md:ml-2" onClick={goToToday}>
+            <Button variant="outline" size="sm" className="ml-1 h-8 shrink-0 bg-transparent md:ml-2" onClick={goToToday}>
               Today
             </Button>
           </div>

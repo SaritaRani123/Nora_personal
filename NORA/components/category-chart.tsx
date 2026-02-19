@@ -17,6 +17,10 @@ import { getCharts, type ChartData } from '@/lib/services/charts'
 
 const COLORS = ['#22c55e', '#3b82f6', '#ef4444', '#eab308', '#a855f7', '#6b7280']
 
+// Shared tooltip styling: shadcn CSS variables (bg-popover, border, text-foreground, text-muted-foreground) for light + dark mode. Used by both Dashboard and Expenses pie charts.
+const CHART_TOOLTIP_WRAPPER_CLASS =
+  'rounded-md border border-border bg-popover px-3 py-2 shadow-lg'
+
 
 interface ActiveShapeProps {
   cx: number
@@ -41,8 +45,6 @@ const renderActiveShape = (props: ActiveShapeProps) => {
     startAngle,
     endAngle,
     fill,
-    payload,
-    value,
   } = props
 
   return (
@@ -70,26 +72,6 @@ const renderActiveShape = (props: ActiveShapeProps) => {
         fill={fill}
         style={{ opacity: 0.5 }}
       />
-      <text
-        x={cx}
-        y={cy - 8}
-        textAnchor="middle"
-        fill="#ffffff"
-        className="text-xs font-medium"
-        style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.5)' }}
-      >
-        {payload.name}
-      </text>
-      <text
-        x={cx}
-        y={cy + 10}
-        textAnchor="middle"
-        fill="#ffffff"
-        className="text-sm font-semibold"
-        style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.5)' }}
-      >
-        ${value.toLocaleString()}
-      </text>
     </g>
   )
 }
@@ -126,7 +108,7 @@ export function CategoryChart({ compact = false, showTooltip = false }: Category
       const item = payload[0].payload
       const percentage = total > 0 ? ((item.value / total) * 100).toFixed(1) : '0'
       return (
-        <div className="bg-popover border border-border rounded-md px-3 py-2 shadow-lg">
+        <div className={CHART_TOOLTIP_WRAPPER_CLASS}>
           <p className="text-sm font-medium text-foreground">{item.name}</p>
           <p className="text-sm text-muted-foreground">
             ${item.value.toLocaleString()} ({percentage}%)

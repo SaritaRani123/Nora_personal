@@ -58,11 +58,6 @@ const sortAlphabetically = <T extends { name?: string; label?: string }>(items: 
   })
 }
 
-// Only send date range to API when both From and To are set (backend filters by from/to)
-const expensesFetcher = (from?: string | null, to?: string | null) => {
-  const hasBoth = from && to
-  return listExpenses(hasBoth ? { from, to, startDate: from, endDate: to } : undefined)
-}
 const categoriesFetcher = () => listCategories()
 
 export default function ExpensesPage() {
@@ -76,14 +71,14 @@ export default function ExpensesPage() {
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set())
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
-  // API-driven data fetching with SWR; only refetch when BOTH dates are set (avoids scroll jump when selecting first date)
-  const dateKey = fromDate && toDate ? [fromDate, toDate] : null
+  // Only apply date range when BOTH From and To are set and From <= To (inclusive range). Otherwise do not filter by date.
+  const dateRangeInvalid = Boolean(fromDate && toDate && fromDate > toDate)
+  const dateRangeApplied = Boolean(fromDate && toDate && !dateRangeInvalid)
+
+  // Fetch all expenses once (static key). Filter by date range client-side so changing From/To does not refetch or cause scroll (same pattern as Bank Statement page).
   const { data: expenses = [], error: expensesError, isLoading: expensesLoading, mutate: mutateExpenses } = useSWR(
-    ['expenses', dateKey],
-    ([, key]) => {
-      const [start, end] = Array.isArray(key) ? key : [null, null]
-      return expensesFetcher(start as string | undefined, end as string | undefined)
-    },
+    'expenses',
+    () => listExpenses(),
     { keepPreviousData: true }
   )
   const { data: categories = [], error: categoriesError, isLoading: categoriesLoading } = useSWR('categories', categoriesFetcher)
@@ -97,11 +92,10 @@ export default function ExpensesPage() {
   const isLoading = expensesLoading || categoriesLoading
   const hasError = expensesError || categoriesError
 
-  // When both dates are set: backend is asked to filter (from/to); we also filter client-side so the range works even if backend doesn't support it
-  const dateRangeForFilter =
-    fromDate && toDate
-      ? { from: new Date(fromDate), to: new Date(toDate) }
-      : { from: undefined as Date | undefined, to: undefined as Date | undefined }
+  // Apply date filter only when both dates set and From <= To
+  const dateRangeForFilter = dateRangeApplied
+    ? { from: new Date(fromDate!), to: new Date(toDate!) }
+    : { from: undefined as Date | undefined, to: undefined as Date | undefined }
   const filteredExpenses = filterExpenses(expenses, {
     categoryFilter,
     searchQuery,
@@ -179,9 +173,12 @@ export default function ExpensesPage() {
 
   const totalExpenses = getTotalExpensesFromFiltered(filteredExpenses)
 
-  // Calculate "This Month" - sum of expenses in the current month
+  // When date range is applied, summary cards use filtered expenses only; otherwise use full list
+  const expensesForSummary = dateRangeApplied ? filteredExpenses : expenses
+
+  // Calculate "This Month" - sum of expenses in the current month (from applicable list)
   const now = new Date()
-  const thisMonthExpenses = expenses.filter((e) => {
+  const thisMonthExpenses = expensesForSummary.filter((e) => {
     const expenseDate = parseDateString(e.date)
     return isSameMonth(expenseDate, now)
   })
@@ -189,7 +186,7 @@ export default function ExpensesPage() {
 
   // Calculate "Last Month" for comparison
   const lastMonth = subMonths(now, 1)
-  const lastMonthExpenses = expenses.filter((e) => {
+  const lastMonthExpenses = expensesForSummary.filter((e) => {
     const expenseDate = parseDateString(e.date)
     return isSameMonth(expenseDate, lastMonth)
   })
@@ -201,16 +198,25 @@ export default function ExpensesPage() {
     ? `+${Math.round(monthOverMonthChange)}%`
     : `${Math.round(monthOverMonthChange)}%`
 
-  // Calculate "Average per Day" - (sum of last 30 days) / 30
-  const thirtyDaysAgo = subDays(now, 30)
-  const thirtyDaysAgoStr = formatDateToLocal(thirtyDaysAgo)
-  const nowStr = formatDateToLocal(now)
-  const last30DaysExpenses = expenses.filter((e) => e.date >= thirtyDaysAgoStr && e.date <= nowStr)
-  const last30DaysTotal = last30DaysExpenses.reduce((sum, e) => sum + e.amount, 0)
-  const averagePerDay = last30DaysTotal / 30
+  // Calculate "Average per Day" - when date range applied: total / days in range; otherwise (last 30 days sum) / 30
+  const averagePerDay = dateRangeApplied && fromDate && toDate
+    ? (() => {
+        const from = new Date(fromDate)
+        const to = new Date(toDate)
+        const days = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+        return totalExpenses / days
+      })()
+    : (() => {
+        const thirtyDaysAgo = subDays(now, 30)
+        const thirtyDaysAgoStr = formatDateToLocal(thirtyDaysAgo)
+        const nowStr = formatDateToLocal(now)
+        const last30DaysExpenses = expenses.filter((e) => e.date >= thirtyDaysAgoStr && e.date <= nowStr)
+        const last30DaysTotal = last30DaysExpenses.reduce((sum, e) => sum + e.amount, 0)
+        return last30DaysTotal / 30
+      })()
 
-  // Calculate "Pending Review" - count where status is not 'paid'
-  const pendingReviewCount = expenses.filter((e) => e.status !== 'paid').length
+  // Calculate "Pending Review" - count where status is not 'paid' (from applicable list)
+  const pendingReviewCount = expensesForSummary.filter((e) => e.status !== 'paid').length
 
   const getCategoryName = (categoryId: string) => {
     return categories.find(c => c.id === categoryId)?.name || categoryId
@@ -274,7 +280,7 @@ export default function ExpensesPage() {
         })
       }
       
-      // Revalidate the expenses data (use bound mutate - key is ['expenses', fromDate, toDate])
+      // Revalidate the expenses data
       mutateExpenses()
       mutate('expenses')
       mutate('payable-summary')
@@ -440,7 +446,9 @@ export default function ExpensesPage() {
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      Average daily spending calculated from the last 30 days of expenses.
+                      {dateRangeApplied
+                        ? 'Average daily spending over the selected date range.'
+                        : 'Average daily spending calculated from the last 30 days of expenses.'}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -449,10 +457,10 @@ export default function ExpensesPage() {
                     <p className="text-2xl font-bold text-foreground cursor-default">${Math.round(averagePerDay).toLocaleString()}</p>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
-                    <p>~${Math.round(averagePerDay).toLocaleString()} average daily spend over 30 days</p>
+                    <p>~${Math.round(averagePerDay).toLocaleString()} average daily spend{dateRangeApplied ? ' in selected range' : ' over 30 days'}</p>
                   </TooltipContent>
                 </Tooltip>
-                <p className="mt-1 text-xs text-muted-foreground">Last 30 days</p>
+                <p className="mt-1 text-xs text-muted-foreground">{dateRangeApplied ? 'Selected range' : 'Last 30 days'}</p>
               </CardContent>
             </Card>
             <Card className="bg-card border-border">
@@ -539,14 +547,21 @@ export default function ExpensesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <DateRangeFilter
-                  fromDate={fromDate}
-                  toDate={toDate}
-                  onFromDateChange={setFromDate}
-                  onToDateChange={setToDate}
-                  title="Filter by Date"
-                  description="Select a date range to filter expenses"
-                />
+                <div className="flex flex-col gap-1">
+                  <DateRangeFilter
+                    fromDate={fromDate}
+                    toDate={toDate}
+                    onFromDateChange={setFromDate}
+                    onToDateChange={setToDate}
+                    title="Filter by Date"
+                    description="Select a date range to filter expenses"
+                  />
+                  {dateRangeInvalid && (
+                    <p className="text-xs text-destructive" role="alert">
+                      From date must be on or before To date.
+                    </p>
+                  )}
+                </div>
                 {hasAnyFilter && (
                   <Button 
                     variant="ghost" 
@@ -599,7 +614,16 @@ export default function ExpensesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredExpenses.map((expense) => (
+                  {filteredExpenses.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                        {dateRangeApplied
+                          ? 'No expenses found for this date range.'
+                          : 'No expenses match your filters.'}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                  filteredExpenses.map((expense) => (
                     <TableRow key={expense.id} className={`hover:bg-muted/30 ${selectedExpenseIds.has(expense.id) ? 'bg-muted/20' : ''}`}>
                       <TableCell>
                         <Checkbox 
@@ -666,7 +690,8 @@ export default function ExpensesPage() {
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ))
+                  )}
                 </TableBody>
               </Table>
             </div>

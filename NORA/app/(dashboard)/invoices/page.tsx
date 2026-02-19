@@ -64,7 +64,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
+import { DateRangeFilter } from '@/components/date-range-filter'
 import useSWR, { mutate } from 'swr'
+import { cn } from '@/lib/utils'
 import { listInvoices, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi, type Invoice } from '@/lib/services/invoices'
 import { listWorkDone, type WorkDoneEntry } from '@/lib/services/work-done'
 import { listTimeEntries, type TimeEntry } from '@/lib/services/time-entries'
@@ -78,6 +80,20 @@ function getCurrencySymbol(invoice: Invoice): string {
   return CURRENCY_SYMBOLS[invoice.invoiceCurrency ?? 'CAD'] ?? '$'
 }
 
+/** Parse YYYY-MM-DD as local date (not UTC). Do not use new Date("YYYY-MM-DD"). */
+function parseLocalDate(dateStr: string): { year: number; month: number; day: number } {
+  const [year, month, day] = dateStr.slice(0, 10).split('-').map(Number)
+  return { year, month: month - 1, day }
+}
+function localStartOfDay(dateStr: string): Date {
+  const { year, month, day } = parseLocalDate(dateStr)
+  return new Date(year, month, day, 0, 0, 0, 0)
+}
+function localEndOfDay(dateStr: string): Date {
+  const { year, month, day } = parseLocalDate(dateStr)
+  return new Date(year, month, day, 23, 59, 59, 999)
+}
+
 const statusConfig = {
   paid: { label: 'Paid', variant: 'default' as const, icon: CheckCircle2, color: 'text-success bg-success/10' },
   pending: { label: 'Pending', variant: 'secondary' as const, icon: Clock, color: 'text-chart-4 bg-chart-4/10' },
@@ -89,9 +105,22 @@ const InvoicesPage = () => {
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null)
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
+
+  const dateRangeInvalid = Boolean(fromDate && toDate && fromDate > toDate)
+  const dateRangeApplied = Boolean(fromDate && toDate && !dateRangeInvalid)
+
+  const hasAnyFilter = Boolean(fromDate || toDate || searchQuery !== '' || statusFilter !== 'all')
+  const clearAllFilters = () => {
+    setFromDate('')
+    setToDate('')
+    setSearchQuery('')
+    setStatusFilter('all')
+  }
   
   const { data: invoices = [] } = useSWR<Invoice[]>('invoices', () => listInvoices())
   const { data: unbilledWork = [] } = useSWR<WorkDoneEntry[]>('work-done-unbilled', () =>
@@ -167,14 +196,25 @@ const InvoicesPage = () => {
   }), [invoices])
 
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((invoice) => {
+    let list = invoices.filter((invoice) => {
       const matchesSearch =
         invoice.client.toLowerCase().includes(searchQuery.toLowerCase()) ||
         invoice.id.toLowerCase().includes(searchQuery.toLowerCase())
       const matchesStatus = statusFilter === 'all' || invoice.status === statusFilter
       return matchesSearch && matchesStatus
     })
-  }, [invoices, searchQuery, statusFilter])
+    if (dateRangeApplied) {
+      const fromStart = localStartOfDay(fromDate)
+      const toEnd = localEndOfDay(toDate)
+      list = list.filter((invoice) => {
+        const dateStr = (invoice.issueDate || '').slice(0, 10)
+        if (!dateStr || dateStr.length < 10) return false
+        const invoiceDate = localStartOfDay(dateStr)
+        return invoiceDate >= fromStart && invoiceDate <= toEnd
+      })
+    }
+    return list
+  }, [invoices, searchQuery, statusFilter, dateRangeApplied, fromDate, toDate])
 
   // Format date helper (parse YYYY-MM-DD without timezone shift)
   const formatDate = (dateString: string) => {
@@ -345,6 +385,7 @@ const InvoicesPage = () => {
                     checked={unbilledRows.length > 0 && selectedUnbilledIds.size === unbilledRows.length}
                     onCheckedChange={toggleAllUnbilled}
                     aria-label="Select all"
+                    className="border-2 border-border bg-background dark:bg-muted/60 dark:border-border data-[state=checked]:text-primary-foreground"
                   />
                 </TableHead>
                 <TableHead>Type</TableHead>
@@ -365,12 +406,19 @@ const InvoicesPage = () => {
                 </TableRow>
               ) : (
                 unbilledRows.map((row) => (
-                  <TableRow key={row.id}>
+                  <TableRow
+                    key={row.id}
+                    className={cn(
+                      'hover:bg-muted/50 transition-colors',
+                      selectedUnbilledIds.has(row.id) && 'bg-muted text-foreground hover:bg-muted/80'
+                    )}
+                  >
                     <TableCell>
                       <Checkbox
                         checked={selectedUnbilledIds.has(row.id)}
                         onCheckedChange={() => toggleUnbilledSelection(row.id)}
                         aria-label={`Select ${row.description}`}
+                        className="border-2 border-border bg-background dark:bg-muted/60 dark:border-border data-[state=checked]:text-primary-foreground"
                       />
                     </TableCell>
                     <TableCell>
@@ -397,7 +445,7 @@ const InvoicesPage = () => {
         <CardHeader>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle>Recent Invoices</CardTitle>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -419,6 +467,32 @@ const InvoicesPage = () => {
                   <SelectItem value="draft">Draft</SelectItem>
                 </SelectContent>
               </Select>
+              <div className="flex flex-col gap-1">
+                <DateRangeFilter
+                  fromDate={fromDate}
+                  toDate={toDate}
+                  onFromDateChange={setFromDate}
+                  onToDateChange={setToDate}
+                  title="Filter by Date"
+                  description="Select a date range to filter invoices (by issue date)"
+                />
+                {dateRangeInvalid && (
+                  <p className="text-xs text-destructive" role="alert">
+                    From date must be on or before To date.
+                  </p>
+                )}
+              </div>
+              {hasAnyFilter && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearAllFilters}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="mr-1 h-4 w-4" />
+                  Clear Filters
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -438,7 +512,7 @@ const InvoicesPage = () => {
               {filteredInvoices.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                    No invoices found
+                    {dateRangeApplied ? 'No invoices found for this date range.' : 'No invoices found'}
                   </TableCell>
                 </TableRow>
               ) : (

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { User, Bell, Shield, Save } from 'lucide-react'
 import { useUser } from '@/lib/contexts/UserContext'
 import { getUserInitials } from '@/lib/services/user'
+import { useToast } from '@/hooks/use-toast'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,15 +12,31 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 
+const AVATAR_ACCEPT = 'image/png,image/jpeg,image/jpg,image/gif'
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024 // 2MB
+const AVATAR_STORAGE_KEY = 'nora_avatar'
+
 export default function SettingsPage() {
   const { user, updateUser } = useUser()
+  const { toast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [activeTab, setActiveTab] = useState('profile')
+  const [avatar, setAvatar] = useState<string | null>(null)
   const [form, setForm] = useState({
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
     phone: user.phone,
   })
+
+  useEffect(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem(AVATAR_STORAGE_KEY) : null
+      if (stored) setAvatar(stored)
+    } catch {
+      // ignore
+    }
+  }, [])
 
   useEffect(() => {
     setForm({
@@ -32,6 +49,39 @@ export default function SettingsPage() {
 
   const handleSaveProfile = () => {
     updateUser(form)
+  }
+
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif']
+    if (!allowedTypes.includes(file.type)) {
+      toast({ title: 'Only JPG/PNG/GIF allowed', variant: 'destructive' })
+      return
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      toast({ title: 'Max 2MB', variant: 'destructive' })
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      try {
+        localStorage.setItem(AVATAR_STORAGE_KEY, result)
+        setAvatar(result)
+        toast({ title: 'Avatar updated' })
+      } catch {
+        toast({ title: 'Failed to save avatar', variant: 'destructive' })
+      }
+    }
+    reader.readAsDataURL(file)
   }
 
   const tabs = [
@@ -78,11 +128,23 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground">
-                    {getUserInitials(user)}
+                  <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-2xl font-bold text-primary-foreground">
+                    {avatar ? (
+                      <img src={avatar} alt="Avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      getUserInitials(user)
+                    )}
                   </div>
                   <div>
-                    <Button variant="outline" size="sm" className="bg-transparent">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={AVATAR_ACCEPT}
+                      className="hidden"
+                      aria-hidden
+                      onChange={handleAvatarChange}
+                    />
+                    <Button type="button" variant="outline" size="sm" className="bg-transparent" onClick={handleAvatarClick}>
                       Change Avatar
                     </Button>
                     <p className="mt-1 text-xs text-muted-foreground">JPG, PNG or GIF. Max 2MB.</p>
