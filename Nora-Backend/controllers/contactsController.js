@@ -14,6 +14,20 @@ export const getContacts = (req, res) => {
 export const createContact = (req, res) => {
   try {
     const { name, email, phone, address } = req.body;
+
+    // Check for duplicate by name AND email
+    const existing = contactsStore.find(
+      (c) =>
+        c.name.toLowerCase() === name.toLowerCase() &&
+        c.email.toLowerCase() === email.toLowerCase()
+    );
+
+    if (existing) {
+      return res.status(400).json({
+        error: 'A contact with this name and email already exists',
+      });
+    }
+    
     const newContact = {
       id: `c-${Date.now()}`,
       name: name || '',
