@@ -14,15 +14,15 @@ export default function DashboardLayout({
 }) {
   return (
     <UserProvider>
-    <SidebarProvider>
-      <div className="print:hidden">
+    <SidebarProvider className="w-full min-w-0">
+      <div className="print:hidden shrink-0 grow-0 basis-auto">
         <AppSidebar />
       </div>
-      <SidebarInset>
-        <div className="print:hidden">
+      <SidebarInset className="min-w-0">
+        <div className="print:hidden h-16 shrink-0" aria-hidden>
           <DashboardHeader />
         </div>
-        <main className="flex-1 overflow-auto">
+        <main className="min-h-0 min-w-0 flex-1 overflow-auto">
           {children}
         </main>
       </SidebarInset>

@@ -1,64 +1,79 @@
 # Nora Backend API
 
-**Backend only.** This folder contains the Node.js API server for Nora. The UI runs in a separate project: **Nora/**.
+**Backend only.** This folder contains the Node.js API server for **Nora**, the business expense and financial management application. The UI runs in a separate project: **NORA/** (frontend).
 
-- **Nora-Backend/** (this folder): backend API — runs on port **8080**
-- **Nora/**: frontend — runs on port **3000**
+- **Nora-Backend/** (this folder): backend API — runs on **port 8080**
+- **NORA/**: frontend — runs on **port 3000**
 
 Do not mix frontend and backend code; keep them in these two separate folders.
 
+---
+
+## Tech stack
+
+- **Runtime:** Node.js 18+ (ES modules)
+- **Framework:** Express
+- **CORS:** Enabled for frontend origin (e.g. `http://localhost:3000`)
+- **Uploads:** Multer (e.g. statement uploads)
+- **Data:** In-memory mock data (see **Data storage** below); ready to swap for a database or AWS
+
+---
+
 ## Features
 
-- RESTful API endpoints for all frontend features
-- CORS enabled for frontend on port 3000
-- All responses in array format (even single items)
-- Modular structure (routes, controllers, data)
-- Ready for AWS/database integration
+- RESTful API for all frontend features (expenses, invoices, contacts, statements, reports, etc.)
+- All responses in **array format** (even single items) to match frontend expectations
+- Modular structure: routes, controllers, and data layer
+- Health check endpoint
+- Ready for AWS or database integration (replace mock data in controllers)
+
+---
 
 ## Prerequisites
 
 - Node.js 18+ (ES modules support)
 - npm or yarn
 
-## Installation
+---
 
-1. Install dependencies:
+## Installation
 
 ```bash
 npm install
 ```
 
-## Running the Server
+---
 
-### Development Mode (with auto-reload)
+## Running the server
+
+### Development (with auto-reload)
 
 ```bash
 npm run dev
 ```
 
-### Production Mode
+### Production
 
 ```bash
 npm start
 ```
 
-The server will start on **port 8080** by default.
-
-You can override the port using the `PORT` environment variable:
+Server runs on **port 8080** by default. Override with `PORT`:
 
 ```bash
 PORT=3001 npm start
 ```
 
-## Health Check
+---
 
-Once the server is running, check health:
+## Health check
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-Response:
+Example response:
+
 ```json
 {
   "status": "ok",
@@ -66,14 +81,17 @@ Response:
 }
 ```
 
-## Folder Structure
+---
+
+## Folder structure
 
 ```
 Nora-Backend/
-├── server.js                 # Main server entry point
-├── package.json              # Dependencies and scripts
-├── data/
-│   └── mockData.js          # Mock data for all entities
+├── server.js                 # Main entry point (Express, CORS, routes)
+├── package.json
+├── data/                     # Mock data
+│   ├── mockData.js           # In-memory data for all entities
+│   └── ...                   # Other data files as needed
 ├── controllers/
 │   ├── expensesController.js
 │   ├── categoriesController.js
@@ -96,7 +114,7 @@ Nora-Backend/
 │   ├── stats.js
 │   ├── charts.js
 │   └── reports.js
-├── docs/                     # API documentation (organized)
+├── docs/                     # API documentation
 │   ├── README.md
 │   ├── API.md                # Overview & quick reference
 │   ├── API-Invoices.md
@@ -110,141 +128,104 @@ Nora-Backend/
 │   ├── API-Charts.md
 │   └── API-Reports.md
 ├── README.md                 # This file
-└── API.md                    # API documentation (legacy)
+└── API.md                    # Legacy API doc (if present)
 ```
 
-## API Endpoints
+---
 
-All endpoints return data in **array format**. See `docs/API.md` and `docs/API-Invoices.md` for detailed request/response documentation.
+## API endpoints (overview)
 
-### Main Endpoints
+All endpoints return data in **array format**. See **docs/API.md** and the **docs/API-*.md** files for request/response details.
 
-- `GET /expenses` - List expenses (with filters)
-- `POST /expenses` - Create expense
-- `PATCH /expenses/:id` - Update expense
-- `DELETE /expenses/:id` - Delete expense
+| Area | Methods | Notes |
+|------|---------|--------|
+| **Expenses** | GET, POST, PATCH, DELETE | List with filters |
+| **Categories** | GET | List categories |
+| **Budget** | GET | Budget overview |
+| **Statements** | GET, POST | List; upload (multipart); GET transactions by statement |
+| **Contacts** | GET, POST, PUT, DELETE | CRUD |
+| **Invoices** | GET, POST, PATCH, DELETE | CRUD |
+| **Payable summary** | GET | Overdue / owing for dashboard |
+| **Stats** | GET | Dashboard stats (income, expenses, net, etc.) |
+| **Charts** | GET | Chart data (e.g. `?range=12` or `24`) |
+| **Reports** | GET | Full reports (stats, trends, insights, heatmap) |
 
-- `GET /categories` - List categories
+Example paths: `GET /expenses`, `POST /expenses`, `GET /invoices`, `GET /payable-summary`, `GET /stats`, `GET /charts?range=12`, `GET /reports`.
 
-- `GET /budget` - Get budget overview
-
-- `GET /statements` - List statements (includes `transactionsList` per statement)
-- `GET /statements/:id/transactions` - Get transactions for a statement
-- `POST /statements/upload` - Upload statement (multipart/form-data)
-
-- `GET /contacts` - List contacts
-
-- `GET /invoices` - List invoices
-- `POST /invoices` - Create invoice
-- `PATCH /invoices/:id` - Update invoice
-- `DELETE /invoices/:id` - Delete invoice
-
-- `GET /payable-summary` - Get payable/owing summary (overdue invoices, bills; for dashboard)
-
-- `GET /stats` - Dashboard stats (totalIncome=0, expenses, net profit, changes)
-- `GET /charts?range=12|24` - Chart data (income/expense and category)
-- `GET /reports` - Full reports data (stats, trends, insights, heatmap)
-
-- `POST /contacts` - Create contact
-- `PUT /contacts` - Update contact (body: `{ id, ...updates }`)
-- `DELETE /contacts?id=` - Delete contact
+---
 
 ## Running with the frontend
 
-1. Start the backend (this folder): `npm start` → http://localhost:8080  
-2. Start the frontend (Nora/): `npm run dev` → http://localhost:3000  
+1. Start the backend (this folder): `npm start` or `npm run dev` → http://localhost:8080  
+2. Start the frontend (NORA/): `npm run dev` → http://localhost:3000  
 3. Use the app at http://localhost:3000; it will call the API on port 8080.
 
-## CORS Configuration
+---
 
-The server is configured to accept requests from `http://localhost:3000` (frontend).
+## CORS
 
-To change the allowed origin, modify `server.js`:
+The server allows requests from the frontend origin (e.g. `http://localhost:3000`). In **server.js**:
 
 ```javascript
 app.use(cors({
-  origin: 'http://localhost:3000', // Change this
+  origin: 'http://localhost:3000',
   credentials: true
 }));
 ```
 
-## Data Storage
+Change `origin` if your frontend runs on a different URL.
 
-Currently, data is stored in-memory (mock data). This means:
+---
 
-- Data resets on server restart
-- Changes are not persisted
+## Data storage
 
-### Future Integration
+Data is currently **in-memory** (mock data in **data/** and controllers). As a result:
 
-To integrate with AWS or a database:
+- Data is lost on server restart
+- No persistence
 
-1. **Replace mock data access** in controllers:
-   - Instead of `import { expenses } from '../data/mockData.js'`
-   - Use database queries or AWS SDK calls
+### Moving to a real backend
 
-2. **Example for AWS DynamoDB**:
-   ```javascript
-   import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-   import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb';
-   
-   const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-   const result = await client.send(new ScanCommand({ TableName: 'expenses' }));
-   ```
+To use a database or AWS:
 
-3. **Example for PostgreSQL**:
-   ```javascript
-   import { Pool } from 'pg';
-   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-   const result = await pool.query('SELECT * FROM expenses');
-   ```
+1. **Controllers:** Replace mock data access (e.g. `import { expenses } from '../data/mockData.js'`) with DB or AWS SDK calls.
+2. **Environment:** Use a `.env` file and something like `dotenv` for credentials; do not commit `.env`.
+3. **Examples:**
+   - **DynamoDB:** Use `@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb` (e.g. `ScanCommand`, `PutCommand`).
+   - **PostgreSQL:** Use `pg` with a connection pool and `pool.query()`.
 
-4. **Environment variables**:
-   - Create `.env` file for sensitive credentials
-   - Use `dotenv` package to load environment variables
-   - Never commit `.env` to version control
+---
 
-## Response Format
+## Response format
 
-All API responses follow this pattern:
+Responses use a single key with an array value, for example:
 
 ```json
-{
-  "expenses": [ ... ]  // Array format
-}
+{ "expenses": [ ... ] }
 ```
-
-or
 
 ```json
-{
-  "payableSummary": [ ... ]  // Array format
-}
+{ "payableSummary": [ ... ] }
 ```
 
-Even single items are wrapped in arrays to match frontend expectations.
+Single resources are still returned as one-element arrays where the frontend expects an array.
 
-## Error Handling
+---
 
-The server includes error handling middleware:
+## Error handling
 
-- 404 for unknown routes
-- 500 for server errors
-- Error messages included in response
+- **404** for unknown routes  
+- **500** for server errors  
+- JSON error body, e.g. `{ "error": "Expense not found" }`
 
-Example error response:
-```json
-{
-  "error": "Expense not found"
-}
-```
+---
 
-## Development Tips
+## Development tips
 
-1. **Testing endpoints**: Use tools like Postman, Insomnia, or `curl`
-2. **Logging**: Add `console.log()` in controllers for debugging
-3. **Validation**: Consider adding input validation middleware (e.g., `express-validator`)
-4. **Rate limiting**: Add rate limiting for production (e.g., `express-rate-limit`)
+- Test with Postman, Insomnia, or `curl`.
+- Add validation (e.g. `express-validator`) and rate limiting (e.g. `express-rate-limit`) for production.
+
+---
 
 ## License
 

@@ -24,8 +24,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} ${playfair.variable} font-sans antialiased`}>
+    <html lang="en" suppressHydrationWarning className="w-full min-w-0">
+      <body className={`${inter.className} ${playfair.variable} w-full min-w-0 font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

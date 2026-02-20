@@ -608,6 +608,8 @@ export default function AuthPage() {
                       <Input
                         id="loginEmail"
                         type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
                         placeholder="john@business.com"
                         className="pl-10"
                         required
@@ -621,6 +623,8 @@ export default function AuthPage() {
                       <Input
                         id="loginPassword"
                         type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
                         placeholder="Enter your password"
                         className="pl-10 pr-10"
                         required

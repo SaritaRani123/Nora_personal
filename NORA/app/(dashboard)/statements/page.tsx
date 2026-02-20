@@ -528,7 +528,7 @@ export default function StatementsPage() {
                     <Button
                       variant="outline"
                       onClick={handleBrowseClick}
-                      className="flex-1 bg-transparent hover:bg-muted/50 cursor-pointer"
+                      className="flex-1 bg-transparent text-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
                     >
                       Change File
                     </Button>

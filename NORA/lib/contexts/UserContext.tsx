@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { fetchUser } from '@/lib/services/user'
+import { fetchUser, AVATAR_STORAGE_KEY } from '@/lib/services/user'
 import type { User } from '@/lib/services/user'
 
 interface UserContextValue {
@@ -23,6 +23,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const updateUser = useCallback((updates: Partial<User>) => {
+    if (updates.avatar !== undefined && typeof window !== 'undefined') {
+      try {
+        if (updates.avatar) window.localStorage.setItem(AVATAR_STORAGE_KEY, updates.avatar)
+        else window.localStorage.removeItem(AVATAR_STORAGE_KEY)
+      } catch {
+        // ignore
+      }
+    }
     setUser((prev) => (prev ? { ...prev, ...updates } : null))
   }, [])
 

@@ -26,11 +26,14 @@ export function DashboardHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-50 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex items-center gap-4 flex-1 min-w-0">
+    <header
+      className="fixed top-0 z-50 flex h-16 min-w-0 items-center justify-between gap-4 overflow-hidden border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+      style={{ left: 'var(--sidebar-offset, 0)', right: 0 }}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
         <SidebarTrigger className="-ml-1 shrink-0" />
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex shrink-0 items-center gap-2">
         <Button
           variant="ghost"
           size="icon"
@@ -45,8 +48,12 @@ export function DashboardHeader() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-2 px-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
-                {getUserInitials(user)}
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-sm font-medium text-primary-foreground">
+                {user.avatar ? (
+                  <img src={user.avatar} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  getUserInitials(user)
+                )}
               </div>
             </Button>
           </DropdownMenuTrigger>

@@ -14,29 +14,18 @@ import { Separator } from '@/components/ui/separator'
 
 const AVATAR_ACCEPT = 'image/png,image/jpeg,image/jpg,image/gif'
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024 // 2MB
-const AVATAR_STORAGE_KEY = 'nora_avatar'
 
 export default function SettingsPage() {
   const { user, updateUser } = useUser()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [activeTab, setActiveTab] = useState('profile')
-  const [avatar, setAvatar] = useState<string | null>(null)
   const [form, setForm] = useState({
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
     phone: user.phone,
   })
-
-  useEffect(() => {
-    try {
-      const stored = typeof window !== 'undefined' ? localStorage.getItem(AVATAR_STORAGE_KEY) : null
-      if (stored) setAvatar(stored)
-    } catch {
-      // ignore
-    }
-  }, [])
 
   useEffect(() => {
     setForm({
@@ -73,13 +62,8 @@ export default function SettingsPage() {
     const reader = new FileReader()
     reader.onload = () => {
       const result = reader.result as string
-      try {
-        localStorage.setItem(AVATAR_STORAGE_KEY, result)
-        setAvatar(result)
-        toast({ title: 'Avatar updated' })
-      } catch {
-        toast({ title: 'Failed to save avatar', variant: 'destructive' })
-      }
+      updateUser({ avatar: result })
+      toast({ title: 'Avatar updated' })
     }
     reader.readAsDataURL(file)
   }
@@ -129,8 +113,8 @@ export default function SettingsPage() {
               <CardContent className="space-y-6">
                 <div className="flex items-center gap-4">
                   <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-2xl font-bold text-primary-foreground">
-                    {avatar ? (
-                      <img src={avatar} alt="Avatar" className="h-full w-full object-cover" />
+                    {user.avatar ? (
+                      <img src={user.avatar} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
                       getUserInitials(user)
                     )}

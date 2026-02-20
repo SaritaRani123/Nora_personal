@@ -4,12 +4,12 @@
     "date": "2026-02-12",
     "contactId": "",
     "invoiceItem": "",
-    "description": "",
+    "description": "Time 0h 0m",
     "hourlyRate": 75,
-    "durationMinutes": 0,
-    "amount": 0,
+    "durationMinutes": 2317.9666666666667,
+    "amount": 2897.46,
     "invoiceId": null,
-    "timerStartedAt": "2026-02-18T03:16:37.450Z"
+    "timerStartedAt": null
   },
   {
     "id": "time-1771379026015",

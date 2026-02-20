@@ -2463,7 +2463,7 @@ const handleAddEntry = async () => {
           >
             <SheetContent className="flex h-full max-h-screen w-full flex-col overflow-hidden p-0 sm:max-w-md">
               <SheetHeader className="shrink-0 border-b border-border px-4 py-4">
-                <div className="flex items-center justify-between gap-2">
+                <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <SheetTitle className="text-base whitespace-nowrap">New entry in</SheetTitle>
                     <Select
@@ -2494,16 +2494,18 @@ const handleAddEntry = async () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <span>for</span>
-                    <DatePicker
-                      date={selectedDate || new Date()}
-                      onDateChange={(date) => {
-                        if (date) setSelectedDate(date)
-                      }}
-                      placeholder="Select date"
-                      className="h-8"
-                    />
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span className="shrink-0">for</span>
+                    <div className="min-w-0 flex-1">
+                      <DatePicker
+                        date={selectedDate || new Date()}
+                        onDateChange={(date) => {
+                          if (date) setSelectedDate(date)
+                        }}
+                        placeholder="Select date"
+                        className="h-8 w-full"
+                      />
+                    </div>
                   </div>
                 </div>
                 <SheetDescription className="sr-only">
